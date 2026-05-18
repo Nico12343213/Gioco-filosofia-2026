@@ -4529,7 +4529,31 @@ window.addEventListener("keydown", (e) => {
     }
 });
 
+// 🔥 INSERISCI QUESTE VARIABILI IN CIMA AL TUO FILE (FUORI DAL LOOP)
+let fpsTarget = 30;
+let fpsInterval = 1000 / fpsTarget;
+let lastFrameTime = performance.now();
+
+// 🛠️ MODIFICA IL TUO LOOP CON QUESTO CONTROLLO DEL TEMPO
 function loop() {
+    // Richiedi subito il prossimo frame (lascialo in cima)
+    requestAnimationFrame(loop);
+
+    // CALCOLO DEL TEMPO TRASCORSO
+    let now = performance.now();
+    let elapsed = now - lastFrameTime;
+
+    // Se non è passato abbastanza tempo per fare 30 FPS, FERMA IL LOOP QUI
+    if (elapsed < fpsInterval) {
+        return; 
+    }
+
+    // Regola il timer per il prossimo frame sacrificando il lag extra
+    lastFrameTime = now - (elapsed % fpsInterval);
+
+    // ========================================================
+    // DA QUI IN POI SEI DENTRO I 30 FPS FISSI
+    // ========================================================
     // 1. GESTIONE SPECIFICA MINIGIOCO PLATONE
     if (gameState === "platoGame") {
         
