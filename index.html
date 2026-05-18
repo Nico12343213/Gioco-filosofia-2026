@@ -4529,49 +4529,23 @@ window.addEventListener("keydown", (e) => {
     }
 });
 
-// 🔥 INSERISCI QUESTE VARIABILI IN CIMA AL TUO FILE (FUORI DAL LOOP)
-let fpsTarget = 30;
-let fpsInterval = 1000 / fpsTarget;
-let lastFrameTime = performance.now();
-
-// 🛠️ MODIFICA IL TUO LOOP CON QUESTO CONTROLLO DEL TEMPO
+// 🔥 MODIFICA IL TUO LOOP CON QUESTO SISTEMA INTELLIGENTE
 function loop() {
-    // Richiedi subito il prossimo frame (lascialo in cima)
+    // Richiede il prossimo frame alla massima velocità consentita dal monitor
     requestAnimationFrame(loop);
 
-    // CALCOLO DEL TEMPO TRASCORSO
-    let now = performance.now();
-    let elapsed = now - lastFrameTime;
-
-    // Se non è passato abbastanza tempo per fare 30 FPS, FERMA IL LOOP QUI
-    if (elapsed < fpsInterval) {
-        return; 
-    }
-
-    // Regola il timer per il prossimo frame sacrificando il lag extra
-    lastFrameTime = now - (elapsed % fpsInterval);
-
-    // ========================================================
-    // DA QUI IN POI SEI DENTRO I 30 FPS FISSI
     // ========================================================
     // 1. GESTIONE SPECIFICA MINIGIOCO PLATONE
+    // ========================================================
     if (gameState === "platoGame") {
+        if (typeof movePlayer === 'function') movePlayer(0, 0);
+        else if (typeof move === 'function') move();
         
-        // 🔥 MODIFICATO: Usiamo movePlayer(0,0) invece di move() per sbloccare l'omino!
-        if (typeof movePlayer === 'function') {
-            movePlayer(0, 0); 
-        } else if (typeof move === 'function') {
-            move(); 
-        }
-        
-        // Muri invisibili AGGRANDITI attorno ai piedistalli
         if (typeof platoStatues !== 'undefined') {
             for (let i = 0; i < platoStatues.length; i++) {
                 let statua = platoStatues[i];
-                
-                // --- DIMENSIONI HITBOX INGRANDITE ---
-                let mezzoW = 55; // Più largo (destra/sinistra)
-                let mezzoH = 30; // Più spesso (sopra/sotto)
+                let mezzoW = 55; 
+                let mezzoH = 30; 
                 let centroX = statua.x;
                 let centroY = statua.y + 20; 
 
@@ -4591,20 +4565,35 @@ function loop() {
                 }
             }
         }
-
         drawPlatoGameScreen();
-        requestAnimationFrame(loop);
         return; 
     }
 
-    // ... Tutto il resto del tuo loop rimane identico sotto ...
+    // Sicurezza se si cambia scheda del browser
+    if (typeof document !== 'undefined' && document.hidden) {
+        for (let key in keys) { keys[key] = false; }
+    }
+
     updateHeraclitusGame(); 
-    move(); 
+    
+    // ========================================================
+    // 🧭 GESTIONE MOVIMENTO VS INTRO / DIALOGHI
+    // ========================================================
+    if (gameState === "world") {
+        if (typeof move === 'function') move(); 
+    } else if (gameState === "intro" || gameState === "room1_intro" || gameState === "room2_intro" || gameState === "room3_intro" || gameState === "room4_intro") {
+        // Lascia liberi i tasti per la 'E'
+    } else {
+        // Se siamo nei dialoghi normali, pulisci i tasti per evitare che l'omino cammini sotto i testi
+        for (let key in keys) { keys[key] = false; }
+    }
+
+    // Controlli standard del gioco
     checkDialogZone();
     checkKeyCollection();
     updateNearby();
-
     checkGoldenKeyUnlock();
+    
     draw();
 
     if (parmenideGame.active) {
@@ -4627,8 +4616,6 @@ function loop() {
         goldenKey.x = player.x + 10;
         goldenKey.y = player.y - 10;
     }
-
-    requestAnimationFrame(loop);
 }
 loop();
 </script>
