@@ -172,19 +172,23 @@ window.addEventListener('keydown', e => {
     // ========================================================
     if (gameState === "intro") {
         if (k === 'e') gameState = "world";
+        for (let key in keys) { keys[key] = false; }
         return;
     }
     if (gameState === "room1_intro") {
         if (k === 'e') gameState = "world";
+        for (let key in keys) { keys[key] = false; }
         return;
     }
     if (gameState === "room2_intro") {
     if (k === 'e') gameState = "world";
+        for (let key in keys) { keys[key] = false; }
     return;
 }
 if (gameState === "room3_intro") {
     if (k === 'e') {
         gameState = "world";
+        for (let key in keys) { keys[key] = false; }
     }
     return;
 }
@@ -192,6 +196,7 @@ if (gameState === "room3_intro") {
 if (gameState === "room4_intro") {
     if (k === 'e') {
         gameState = "world";
+        for (let key in keys) { keys[key] = false; }
     }
     return;
 }
@@ -412,6 +417,7 @@ if (room === 4) {
     // ========================================================
     if (k === 'e') {
         if (gameState === "platoWin") {
+            for (let key in keys) { keys[key] = false; }
             gameState = "world"; platoneGameAttivo = false; room = 4;
             if (typeof platoneNPC !== 'undefined') {
                 player.x = platoneNPC.x + (platoneNPC.w / 2) - (player.w / 2);
@@ -435,6 +441,7 @@ if (room === 4) {
         if (dialogue) {
             if (gameState === "heraclitus" && heraclitusGame.completed) {
                 gameState = "world";
+                for (let key in keys) { keys[key] = false; }
             }
             if (typeof heraclitusGame !== 'undefined' && heraclitusGame.postWin) {
                 heraclitusGame.postWin = false;
@@ -1337,8 +1344,8 @@ function nextRound() {
         parmenideGame.completed = true;
         parmenideGame.won = true;
         philosophersCompleted.parmenide = true;
-
         gameState = "world"; // Riporta il giocatore nella Room 2 libera
+        for (let key in keys) { keys[key] = false; }
         
         // Riposiziona il player davanti a Parmenide nel mondo reale
         player.x = 800; // Metti le coordinate corrette del tuo NPC Parmenide nella mappa
@@ -1811,6 +1818,7 @@ function evaluateHeraclitusAnswer() {
             
             philosophersCompleted.eraclito = true;
             gameState = "world"; // Torna alla mappa
+            for (let key in keys) { keys[key] = false; }
 
             heraclitusGame.guideWord = "";
             heraclitusGame.options = [];
@@ -2096,6 +2104,7 @@ function checkGoldenKeyUnlock(ultimoCompletato) {
             goldenKey.y = 450;
             goldenKey.followPlayer = false;
             gameState = "world"; // Forza il ritorno alla mappa
+            for (let key in keys) { keys[key] = false; }
 
             // Sceglie il testo in base a chi hai fatto per ULTIMO delle due opzioni
             if (ultimoCompletato === "parmenide") {
@@ -2957,6 +2966,7 @@ function nextDialog() {
         } else {
             // Il giocatore preme [E] una seconda volta sul verdetto: si chiude il dialogo
             gameState = "world"; 
+            for (let key in keys) { keys[key] = false; }
             nearbyInteractable = null; 
             canStartDialog = false; 
 
@@ -4470,8 +4480,8 @@ if (room === 4 && finalKeyTaken) {
     if (dist < 60) {
 
         room4Door.open = true;
-
         gameState = "world";
+        for (let key in keys) { keys[key] = false; }
         room = 5;
 
         player.x = 600;
