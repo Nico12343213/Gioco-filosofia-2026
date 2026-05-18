@@ -1582,10 +1582,10 @@ function move() {
     let dy = 0;
     player.isMoving = false;
     
-    const up = keys["w"] || keys["arrowup"];
-    const down = keys["s"] || keys["arrowdown"];
-    const left = keys["a"] || keys["arrowleft"];
-    const right = keys["d"] || keys["arrowright"];
+    const up    = keys["w"] || keys["W"] || keys["arrowup"]    || keys["ArrowUp"];
+    const down  = keys["s"] || keys["S"] || keys["arrowdown"]  || keys["ArrowDown"];
+    const left  = keys["a"] || keys["A"] || keys["arrowleft"]  || keys["ArrowLeft"];
+    const right = keys["d"] || keys["D"] || keys["arrowright"] || keys["ArrowRight"];
     let s = player.speed;
     
     if (up) { dy = -s; player.dir = 'w'; player.isMoving = true; }
