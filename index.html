@@ -1,0 +1,4601 @@
+<!DOCTYPE html>
+<html lang='it'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<title>Tempio del Logos - Escape Room</title>
+<style>
+html,body{ margin:0; padding:0; background:#0e0f14; display:flex; justify-content:center; align-items:center; height:100%; overflow:hidden; font-family: 'Georgia', serif; }
+canvas{ border:3px solid #c9b27a; image-rendering:pixelated; background: #000; }
+</style>
+</head>
+<body>
+<canvas id='game' width='1200' height='640'></canvas>
+<script>
+const c=document.getElementById('game');
+const canvas = c;
+const ctx=c.getContext('2d');
+const TS=32;
+const W=37,H=20;
+const keys={};
+let dialogue = null;
+let nearbyInteractable = null;
+let isTyping = false;
+let isReflecting = false;
+let quizPhase = false;
+let currentInput = "";
+let targetStatue = null;
+let stepCounter = 0;
+let canReflect = false;
+let reflectionDone = false;
+let gameState = "intro"; // Il gioco parte con la schermata dei comandi
+let globalEventMessage = null;
+let globalEventTimer = 0;
+let heraclitusDialogueClosed = false;
+let keyUnlocked = false;
+let firstCompleted = null;
+let keyReady = false;
+let hasKey = false;
+let finalKeyActive = false;
+let finalKeyTaken = false;
+let goldenKeyUnlocked = false;
+let goldenKeyCollected = false;
+let goldenKey = {
+    x: 600,
+    y: 300,
+    w: 20,
+    h: 20,
+    active: false,
+    collected: false,
+    followPlayer: false
+};
+
+let room3Collisions = [];
+let room4Collisions = []; // Si popolerà dinamicamente
+let platoneNPC = { x: 580, y: 290, w: 40, h: 60, name: "Platone", id_name: "platone", color: "#3498db" };
+
+// Stati del gioco per la stanza
+let platoneDialogoFatto = false; 
+let gemmaSelezionata = null;
+let puzzleDualismoCompletato = false;
+let accoppiamentiCorretti = 0;
+let platoneGameAttivo = false;
+// Colonne ornamentali della stanza
+let room4Pillars = [
+    { x: 60, y: 60 }, { x: 60, y: 260 }, { x: 60, y: 460 },
+    { x: 1100, y: 60 }, { x: 1100, y: 260 }, { x: 1100, y: 460 }
+];
+
+// Definizione delle statue con le loro posizioni e proprietà di collisione
+const platoStatues = [
+    // --- IPERURANIO (Ordine Mescolato: Uomo -> Bilancia -> Triangolo) ---
+    { id: "human_perf",    type: "human",    world: "iperuranio", x: 250, y: 190, radius: 35, interactDist: 85, targetId: "human_imp" },
+    { id: "scale_perf",    type: "scale",    world: "iperuranio", x: 600, y: 190, radius: 35, interactDist: 85, targetId: "scale_imp" },
+    { id: "triangle_perf", type: "triangle", world: "iperuranio", x: 950, y: 190, radius: 35, interactDist: 85, targetId: "triangle_imp" },
+
+    // --- MONDO SENSIBILE (Ordine Standard: Triangolo -> Uomo -> Bilancia) ---
+    { id: "triangle_imp",  type: "triangle", world: "sensibile",  x: 250, y: 490, radius: 35, interactDist: 85, targetId: "triangle_perf" },
+    { id: "human_imp",     type: "human",    world: "sensibile",  x: 600, y: 490, radius: 35, interactDist: 85, targetId: "human_perf" },
+    { id: "scale_imp",     type: "scale",    world: "sensibile",  x: 950, y: 490, radius: 35, interactDist: 85, targetId: "scale_perf" }
+];
+// Stato del sistema di collegamento
+let interactionState = {
+    selectedStatue: null, // Statua del mondo sensibile a cui il giocatore è legato
+    connections: []       // Elenco delle coppie collegate correttamente (es: ["triangle_imp", "human_imp"])
+};
+let room4Door = {
+    open: false
+};
+
+const puzzle = {
+    solvedNames: [],
+    solvedQuizzes: [],
+    doorOpen: false,
+    hasKey: false,
+    keyAppeared: false
+};
+
+const quizData = {
+    'talete': {
+        q: "Perché Talete sceglie proprio l'acqua come arché (principio di tutte le cose) e cosa lo distingue dai poeti del mito?",
+        a: ["1. Perché ha osservato che l'acqua è essenziale per il nutrimento e la crescita di ogni essere vivente, usandola come principio fisico e non come un racconto mitologico.", "2. Perché un'antica servetta tracia gli ha rivelato che l'acqua del pozzo conteneva l'anima divina del mondo.", "3. Perché voleva dimostrare che la Terra galleggia sul mare solo durante i terremoti."],
+        correct: "1"
+    },
+    'anassimandro': {
+        q: "Che cos'è l'ápeiron per Anassimandro e come spiega il ciclo di nascita e morte delle cose?",
+        a: ["1. È un cilindro d'aria sospeso al centro dell'universo che si muove solo verso l'alto.", "2. È un elemento illimitato e indefinito da cui le cose nascono e in cui tornano morendo, pagando una pena per la loro ingiustizia secondo una legge di equilibrio.", "3. È un fuoco invisibile racchiuso dentro enormi ruote di carro che girano intorno alla Terra."],
+        correct: "2"
+    },
+    'anassimene': {
+        q: "In che modo l'aria di Anassimene si trasforma negli altri elementi della natura?",
+        a: ["1. Attraverso l'intervento degli dèi che soffiano sul mondo per creare il caldo e il freddo.", "2. Attraverso lo scontro reciproco tra i pesci e gli altri animali nati dall'umidità del mare.", "3. Attraverso i processi di rarefazione e di condensazione."],
+        correct: "3"
+    }
+};
+
+const oppositeWords = [
+  {
+        guide: "MALATTIA",
+        correct: "SALUTE",
+        wrong: ["MEDICINA", "CORPO", "DOLORE", "CURA"],
+    },
+
+    {
+        guide: "FAME",
+        correct: "SAZIETÀ",
+        wrong: ["CIBO", "PANE", "CUOCO", "GOLOSITA'"],
+    },
+
+    {
+        guide: "GUERRA",
+        correct: "PACE",
+        wrong: ["SANGUE", "SPADA", "CAOS" , "MORTE"]
+    },
+
+    {
+        guide: "UNO",
+        correct: "MOLTI",
+        wrong: ["SINGOLO", "PRIMO", "TUTTO" , "NESSUNO"]
+    },
+
+    {
+       guide: "ARCO",
+        correct: "LIRA",
+        wrong: ["FRECCIA", "CORDA", "BERSAGLIO", "LEGNO"],
+    }
+];
+
+function wrapText(text) {
+    if (Array.isArray(text)) return text;
+    const words = text.split(' ');
+    const lines = [];
+    let currentLine = "";
+    ctx.font = '20px Georgia';
+    for (let i = 0; i < words.length; i++) {
+        let testLine = currentLine + words[i] + " ";
+        if (ctx.measureText(testLine).width > 850) {
+            lines.push(currentLine);
+            currentLine = words[i] + " ";
+        } else {
+            currentLine = testLine;
+        }
+    }
+    lines.push(currentLine);
+    return lines;
+}
+
+window.addEventListener('keydown', e => {
+    const k = e.key.toLowerCase();
+
+    // ========================================================
+    // 🛡️ SCUDO GLOBALE INTRODUZIONE
+    // ========================================================
+    if (gameState === "intro") {
+        if (k === 'e') gameState = "world";
+        return;
+    }
+    if (gameState === "room1_intro") {
+        if (k === 'e') gameState = "world";
+        return;
+    }
+    if (gameState === "room2_intro") {
+    if (k === 'e') gameState = "world";
+    return;
+}
+if (gameState === "room3_intro") {
+    if (k === 'e') {
+        gameState = "world";
+    }
+    return;
+}
+
+if (gameState === "room4_intro") {
+    if (k === 'e') {
+        gameState = "world";
+    }
+    return;
+}
+
+// ========================================================
+    // 🔥 CONTROLLO MOVIMENTO MINIGIOCO ERACLITO (CORSIE)
+    // ========================================================
+    if (heraclitusGame.active && !heraclitusGame.gameOver && !heraclitusGame.won) {
+        if (!heraclitusGame.freeRoam) {
+            if (k === 'a' || k === 'arrowleft') {
+                heraclitusGame.currentLane = Math.max(0, heraclitusGame.currentLane - 1);
+            }
+            if (k === 'd' || k === 'arrowright') {
+                heraclitusGame.currentLane = Math.min(heraclitusGame.lanes - 1, heraclitusGame.currentLane + 1);
+            }
+            return;
+        }
+    }
+
+    // ========================================================
+    // 🔄 RIAVVIO GIOCO ERACLITO IN CASO DI GAME OVER
+    // ========================================================
+    // Usiamo sia 'k' che 'e.code' per essere sicuri al 100% che intercetti lo Spazio!
+    if (heraclitusGame.active && heraclitusGame.gameOver) {
+        if (k === ' ' || k === 'space' || (typeof e !== 'undefined' && e.code === 'Space')) {
+            startHeraclitusGame();
+            return;
+        }
+    }
+    // ========================================================
+// 🏛️ INTERAZIONE E MINIGIOCO PLATONE (ROOM 4)
+// ========================================================
+if (room === 4) {
+    let vicinoAPlatone = false;
+    if (typeof platoneNPC !== 'undefined') {
+        let distX = (player.x + player.w/2) - (platoneNPC.x + platoneNPC.w/2);
+        let distY = (player.y + player.h/2) - (platoneNPC.y + platoneNPC.h/2);
+        let distanza = Math.sqrt(distX * distX + distY * distY);
+        if (distanza < 75) vicinoAPlatone = true;
+    }
+
+    // Trasformiamo il tasto premuto in minuscolo per evitare bug
+    let tastoPremuto = k.toLowerCase();
+
+    if (tastoPremuto === 'e' && (nearbyInteractable?.id_name === 'platone' || vicinoAPlatone)) {
+        if (!platoneDialogoFatto && !platoneGameAttivo) {
+            gameState = "dialog";
+            currentNode = 0;
+            dialogue = [
+                "PLATONE: Viandante, ti trovi nel punto di rottura della realtà.",
+                "Questo è il Dualismo: a sinistra vedi il MONDO SENSIBILE, fatto di copie corrotte e mutevoli.",
+                "A destra splende l'IPERURANIO, il mondo delle IDEE pure, eterne e immutabili.",
+                "Il tessuto metafisico è strappato. Devi ricongiungere le copie imperfette ai loro modelli originali.",
+                "Dimostrami di aver capito le mie parole completando il minigioco.",
+                "Premi il tasto [ Y ] per avviare la prova del dualismo e risolvere il puzzle."
+            ];
+            return;
+        }
+    }
+
+    // Controllo corretto del tasto Y (Rende indolore maiuscole o minuscole nel testo di controllo)
+    if (tastoPremuto === 'y' && gameState === "dialog") {
+        let ultimoTesto = dialogue ? dialogue[dialogue.length - 1].toUpperCase() : "";
+        if (ultimoTesto.includes("TASTO [ Y ]") || ultimoTesto.includes("TASTO [Y]")) {
+            platoneDialogoFatto = true;
+            platoneGameAttivo = true;
+            gameState = "platoGame";
+            dialogue = null;
+            initPlatoGame();
+            return;
+        }
+    }
+
+    if (tastoPremuto === 'y' && gameState !== "dialog") return;
+}
+
+    // ========================================================
+    // 🏛️ SELEZIONE RISPOSTE TRIBUNALE DI ATENE
+    // ========================================================
+    if (gameState === "dialog" && currentNode && currentNode.choices) {
+        if (['1', '2', '3'].includes(k)) {
+            let choiceIndex = parseInt(k) - 1;
+            chooseOption(choiceIndex);
+        }
+        return; 
+    }
+
+    // ========================================================
+    // 🛑 GESTIONE TYPING NOME STATUE (STANZA 1)
+    // ========================================================
+    if (isTyping) {
+        if (e.key === 'Enter') {
+            if (currentInput.toLowerCase().trim() === targetStatue.id_name) {
+                puzzle.solvedNames.push(targetStatue.id_name);
+                dialogue = ["Corretto! Ora rispondi al suo quesito. (Premi E)"];
+            } else {
+                dialogue = ["Il nome non è corretto. Riprova più tardi."];
+            }
+            isTyping = false;
+            currentInput = "";
+        } else if (e.key === 'Backspace') {
+            currentInput = currentInput.slice(0, -1);
+        } else if (e.key.length === 1) {
+            currentInput += e.key;
+        }
+        return;
+    }
+
+    // ========================================================
+    // ❓ GESTIONE QUIZ STATUE (STANZA 1)
+    // ========================================================
+    if (quizPhase) {
+        if (['1', '2', '3'].includes(k)) {
+            const q = quizData[targetStatue.id_name];
+            if (k === q.correct) {
+                puzzle.solvedQuizzes.push(targetStatue.id_name);
+                dialogue = ["Risposta esatta! La statua ora brilla di luce propria."];
+                if (puzzle.solvedQuizzes.length === 3) {
+                    puzzle.keyAppeared = true;
+                }
+            } else {
+                dialogue = ["Errato. La sapienza richiede riflessione. Riprova."];
+            }
+            quizPhase = false;
+        }
+        return;
+    }
+
+    // ========================================================
+    // 🔥 MINIGIOCO ERACLITO
+    // ========================================================
+    if (k === 'p' && nearbyInteractable?.id_name === 'eraclito') {
+        if (philosophersCompleted.eraclito) { 
+            dialogue = ["ERACLITO: Hai compreso la vera essenza del Logos.", "Non c'è più nulla da dimostrare."];
+            return;
+        }
+        if (!heraclitusGame.active) {
+            dialogue = null;
+            startHeraclitusGame();
+            return;
+        }
+    }
+
+    // ========================================================
+    // 🏛️ MINIGIOCO PARMENIDE
+    // ========================================================
+    if (room === 2 && nearbyInteractable?.id_name === 'parmenide') {
+        if (philosophersCompleted.parmenide) { 
+            if (k === 'e') {
+                dialogue = ["PARMENIDE: Hai già compreso l'essenza dell'Essere.", "Non c'è nulla oltre ciò che hai visto."];
+            }
+            return;
+        }
+
+        if (!parmenideGame.active && gameState === "world") {
+            if (k === 'j') {
+                dialogue = null;
+                gameState = "parmenideGame";
+                startParmenideGame();
+                return;
+            }
+            if (k === 'e') {
+                dialogue = ["PARMENIDE: I sensi ti ingannano, l'Essere è immutabile.", "Osserva gli oggetti e trova l'unico che non muta mai nel tempo.", "Premi [J] per entrare nella Via della Verità."];
+                return;
+            }
+        }
+    }
+
+    if (parmenideGame.active && parmenideGame.phase === 3 && !parmenideGame.gameOver && !parmenideGame.won) {
+        if (e.key === "1") chooseDoor(0);
+        if (e.key === "2") chooseDoor(1);
+        if (e.key === "3") chooseDoor(2);
+        return;
+    }
+
+    if (e.code === 'Space' && parmenideGame.active && parmenideGame.gameOver) {
+        startParmenideGame();
+        return;
+    }
+
+    if (k === 'e' && parmenideGame.active && parmenideGame.won) {
+        gameState = "world";
+        parmenideGame.active = false;
+        parmenideGame.won = false;
+        parmenideGame.completed = true;
+        philosophersCompleted.parmenide = true;
+        room = 2;
+        player.x = 600; player.y = 500;
+        
+        if (typeof completePhilosopherGame === 'function') completePhilosopherGame("parmenide");
+        if (typeof unlockGoldenKeyPiece === 'function') unlockGoldenKeyPiece("parmenide");
+        checkGoldenKeyUnlock("parmenide");
+        return;
+    }
+
+    // ========================================================
+    // 🏛️ DIALOGO TRIBUNALE (SOCRATE / MELETO)
+    // ========================================================
+    if (gameState === "dialog") {
+        if (currentNode && !currentNode.choices && k === 'e') {
+            nextDialog();
+        }
+        return; 
+    }
+
+    if (k === 'e' && room === 3) {
+        if (!dialogue && canStartDialog && gameState !== "dialog" && !keySpawned) {
+            gameState = "dialog";
+            dialogStep = 0; juryScore = 50;
+            currentNode = JSON.parse(JSON.stringify(dialogueScene[0]));
+            dialogue = null;
+            return;
+        }
+    }
+
+    // ========================================================
+    // 🔑 GESTIONE DIALOGHI E RACCOLTA OGGETTI AMBIENTALI [E]
+    // ========================================================
+    if (k === 'e') {
+        if (gameState === "platoWin") {
+            gameState = "world"; platoneGameAttivo = false; room = 4;
+            if (typeof platoneNPC !== 'undefined') {
+                player.x = platoneNPC.x + (platoneNPC.w / 2) - (player.w / 2);
+                player.y = platoneNPC.y + platoneNPC.h + 40;
+            } else { player.x = 600; player.y = 500; }
+            finalKeyActive = true; finalKeyTaken = false; finalKeyX = 600; finalKeyY = 150;
+            dialogue = null; return;
+        }
+
+        if (room === 4 && finalKeyActive && !finalKeyTaken) {
+            if (Math.hypot(player.x - finalKeyX, player.y - finalKeyY) < 60) {
+                finalKeyTaken = true; dialogue = ["Hai ottenuto la chiave finale del Tempio!"];
+                return;
+            }
+        }
+
+        if (gameState === "heraclitus" && heraclitusGame.finalZone) {
+        }
+
+        // --- CHIUSURA CODA DIALOGHI ---
+        if (dialogue) {
+            if (gameState === "heraclitus" && heraclitusGame.completed) {
+                gameState = "world";
+            }
+            if (typeof heraclitusGame !== 'undefined' && heraclitusGame.postWin) {
+                heraclitusGame.postWin = false;
+                heraclitusGame.finalZone = false; 
+                heraclitusGame.active = false;
+            }
+            dialogue = null;
+            if (typeof isReflecting !== 'undefined') isReflecting = false;
+            heraclitusDialogueClosed = true;
+            updateNearby(); 
+            return; 
+        }
+
+        if (room === 3 && keySpawned) return;
+
+        // --- INTERAZIONE DIRETTA CON GLI INTERAGIBILI AGGANCIATI ---
+        if (nearbyInteractable) {
+            // 🔥 RACCOLTA CHIAVE STANZA 2 (Si comporta IDENTICA alla stanza 1)
+            if (nearbyInteractable.id === "goldenKey" || nearbyInteractable.id_name === "goldenKey") {
+                goldenKey.collected = true; 
+                nearbyInteractable = null;
+                dialogue = ["Hai raccolto la Vera Chiave d'Oro!", "Portala alla grande porta a Nord per aprirla ed entrare nella Stanza 3."];
+                updateNearby(); 
+                return;
+            }
+
+            if (nearbyInteractable.id === 'altar') {
+                if (puzzle.keyAppeared && !puzzle.hasKey) {
+                    puzzle.hasKey = true; 
+                    dialogue = ["Hai ottenuto la Chiave d'Oro!", "Ora la porta a Nord può essere aperta."];
+                } else { 
+                    dialogue = ["L'altare è freddo. Forse mancano offerte di conoscenza."]; 
+                }
+                return;
+            }
+
+            if (nearbyInteractable.id === 'statue') {
+                targetStatue = nearbyInteractable;
+                if (!puzzle.solvedNames.includes(targetStatue.id_name)) {
+                    dialogue = [targetStatue.info, "Di quale filosofo si tratta?"];
+                    isTyping = true;
+                } else if (!puzzle.solvedQuizzes.includes(targetStatue.id_name)) {
+                    startQuiz(); 
+                } else {
+                    dialogue = ["Questa statua brilla di luce propria."];
+                }
+                return;
+            }
+
+            if (nearbyInteractable.id === 'npc') {
+                if (nearbyInteractable.id_name === 'eraclito' && heraclitusGame.finalZone) {
+                    dialogue = ["ERACLITO: Hai compreso il Logos.", "Nulla resta identico.", "Ora puoi proseguire."];
+                } else { 
+                    dialogue = [nearbyInteractable.info]; 
+                }
+                return;
+            }
+        }
+    }
+
+    // ========================================================
+    // 🧠 RIFLESSIONE
+    // ========================================================
+    if (k === 'r') {
+        if (canReflect && !reflectionDone && !dialogue) {
+            reflectionDone = true; canReflect = false; isReflecting = true;
+            dialogue = ["Il mondo alle mie spalle è fatto di ombre e catene, mi conviene entrare nel tempio per scappare dall'ignoranza."];
+        }
+        return;
+    }
+
+    // ========================================================
+    // 🏃‍♂️ MOVIMENTO
+    // ========================================================
+    if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
+        keys[k] = true;
+    }
+});
+
+function startQuiz() {
+    quizPhase = true;
+    const q = quizData[targetStatue.id_name];
+    dialogue = [q.q, ...q.a, "(Premi 1, 2 o 3)"];
+}
+
+
+function startQuiz() {
+    quizPhase = true;
+    const q = quizData[targetStatue.id_name];
+    dialogue = [q.q, ...q.a, "(Premi 1, 2 o 3)"];
+}
+
+// ========================================================
+// INIZIALIZZAZIONE E RESET MINIGIOCHI STANZA 2
+// ========================================================
+function startHeraclitusGame() {
+    // 1. Resetta gli stati di gioco interni
+    heraclitusGame.active = true;
+    heraclitusGame.gameOver = false;
+    heraclitusGame.won = false;
+    heraclitusGame.completed = false; // Deve essere false finché non vince adesso!
+    heraclitusGame.finalZone = false;
+    heraclitusGame.freeRoam = false;
+    heraclitusGame.postWin = false;
+    heraclitusGame.evaluated = false;
+    
+    // 2. Resetta i flag dei messaggi (altrimenti il gioco crede di aver già mostrato tutto)
+    heraclitusGame.logostextShown = false; 
+    heraclitusGame.logoMessageTimer = 0;
+
+    // 3. Resetta i parametri della partita
+    heraclitusGame.timer = heraclitusGame.maxTimer;
+    heraclitusGame.progress = 0;
+    heraclitusGame.progressPos = 0;
+    heraclitusGame.lives = 2;
+    heraclitusGame.lanes = 2;
+    heraclitusGame.currentLane = 0;
+
+    // Chiude eventuali dialoghi aperti per non bloccare l'interfaccia
+    dialogue = null; 
+    gameState = "heraclitus"; // Imposta il gamestate corretto per il minigioco
+
+    // Qui inserisci la tua logica per generare il primo round (es. nextHeraclitusRound();)
+    nextHeraclitusRound(); 
+}
+
+function resetHeraclitusGame() {
+    heraclitusGame.active = false;
+    heraclitusGame.gameOver = false;
+    heraclitusGame.lanes = 2;
+    heraclitusGame.currentLane = 0;
+    heraclitusGame.progress = 0;
+    heraclitusGame.progressPos = 0;
+    heraclitusGame.mistakes = 0;
+    heraclitusGame.lives = 2;
+    heraclitusGame.timer = heraclitusGame.maxTimer;
+    heraclitusGame.flash = null;
+    heraclitusGame.flashTimer = 0;
+    heraclitusGame.scrollY = 0;
+}
+
+function nextHeraclitusRound() {
+    let data = oppositeWords[Math.floor(Math.random() * oppositeWords.length)];
+    heraclitusGame.guideWord = data.guide;
+    let choices = [data.correct];
+    let wrongs = [...data.wrong];
+    while (choices.length < heraclitusGame.lanes) {
+        let rand = wrongs.splice(Math.floor(Math.random() * wrongs.length), 1)[0];
+        choices.push(rand);
+    }
+    heraclitusGame.evaluated = false;
+    choices.sort(() => Math.random() - 0.5);
+    heraclitusGame.options = choices;
+    heraclitusGame.correctLane = choices.indexOf(data.correct);
+    heraclitusGame.timer = heraclitusGame.maxTimer;
+     
+    heraclitusGame.answerMap = {
+        "MALATTIA": "SALUTE",
+        "FAME": "SAZIETA'",
+        "GUERRA": "PACE",
+        "UNO": "MOLTI",
+        "ARCO": "LIRA"
+    };
+}
+
+function checkQuiz(choice) {
+    const q = quizData[targetStatue.id_name];
+    if (choice === q.correct) {
+        puzzle.solvedQuizzes.push(targetStatue.id_name);
+        dialogue = ["Risposta esatta. Hai compreso l'Archè."];
+        if(puzzle.solvedQuizzes.length === 3) { puzzle.keyAppeared = true; }
+    } else {
+        dialogue = ["Risposta errata. L'ignoranza ti avvolge. Riprova."];
+    }
+    quizPhase = false;
+}
+addEventListener('keyup',e=>keys[e.key]=false);
+const player={ x:5*TS, y:10*TS, w:24, h:34, speed:2.8, dir:'s', walkCycle:0, isMoving:false };
+const PY=Math.floor(H/2);
+let room = 0;
+
+const interactions = {
+    sign: "Il mondo alle mie spalle è fatto di ombre e catene. Cerco il principio di tutte le cose nell'oscurità di questo tempio, sperando che la ragione diventi la mia torcia. Devo entrare, prima che l'ignoranza mi soffochi.",
+    rule_sign: "LE LEGGI DEL TEMPIO: Nomina i tre saggi con 'E'. Risolvi i loro enigmi per ottenere la chiave.",
+    statue1_info: "Indizio: Vedeva nell'acqua il principio di tutte le cose.",
+    statue2_info: "Indizio: Cercò l'infinito (Apeiron).",
+    statue3_info: "Indizio: Per lui tutto è aria (Pneuma)."
+};
+
+function createRoom(){
+    const m=[]; for(let y=0;y<H;y++){ const row=[]; for(let x=0;x<W;x++)row.push(0); m.push(row); }
+    for(let x=0;x<W;x++){ m[0][x]=1; m[H-1][x]=1; }
+    for(let y=0;y<H;y++){ m[y][0]=1; m[y][W-1]=1; }
+    for(let y=3;y<17;y++){ for(let x=22;x<34;x++)m[y][x]=0; }
+    for(let x=0;x<24;x++){ m[PY][x]=3; m[PY+1][x]=3; }
+    return m;
+}
+const maps=[createRoom(),createRoom(), createRoom()];
+
+function drawPath(x, y, w, h) {
+    const colors = ['#8d775f', '#7a6752', '#9b866d', '#6d5a46'];
+    for(let i=0; i<w; i+=8) {
+        for(let j=0; j<h; j+=8) {
+            ctx.fillStyle = colors[(Math.floor(x+i/8) + Math.floor(y+j/8)) % colors.length];
+            ctx.fillRect(x+i, y+j, 8, 8);
+        }
+    }
+}
+
+function isTemple(x,y){
+    const gx=Math.floor(x/TS); const gy=Math.floor(y/TS);
+    return gx>=22 && gx<34 && gy>=10 && gy<=11;
+}
+function checkTile(x,y){
+    const gx=Math.floor(x/TS); const gy=Math.floor(y/TS);
+    if(!maps[room][gy]) return false;
+    return maps[room][gy][gx]===3 || isTemple(x,y);
+}
+function isWalkableRect(x,y,w,h){
+    return (checkTile(x,y) && checkTile(x+w,y) && checkTile(x,y+h) && checkTile(x+w,y+h));
+}
+function coll(x,y){
+    const gx=Math.floor(x/TS); const gy=Math.floor(y/TS);
+    return maps[room][gy] && maps[room][gy][gx]===1;
+}
+
+const trees=[];
+function generateTrees(){
+    if(trees.length) return;
+    for(let x=0;x<W;x++) for(let y=0;y<H;y++){
+        if(y >= PY-1 && y <= PY+2) continue;
+        let zonaRispettoTempio = (x >= 20 && x <= 35 && y >= 1 && y <= 11);
+        if(!zonaRispettoTempio && Math.random() < 0.85) trees.push({x,y,h:0.8+Math.random()*1.4,color:Math.floor(Math.random()*3)});
+    }
+}
+generateTrees();
+
+function drawSignpost(x, y) {
+    ctx.fillStyle = '#3e2723'; ctx.fillRect(x+20, y+30, 6, 25);
+    ctx.fillStyle = '#5d4037'; ctx.fillRect(x, y+5, 50, 25);
+    ctx.fillStyle = '#3e2723'; ctx.fillRect(x+5, y+10, 40, 2);
+    ctx.fillRect(x+5, y+18, 40, 2);
+}
+
+function drawTemple(){
+    const x = 22 * TS, y = (PY - 6.5) * TS, w = 12 * TS, h = 8 * TS;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.ellipse(x + w/2, y + h + 2, w/1.8, 10, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#9e9e9e'; ctx.fillRect(x - 10, y + h, w + 20, 15);
+    ctx.fillStyle = '#f0f0f0'; ctx.fillRect(x, y + h - 10, w, 10);
+    ctx.fillStyle = '#1a1a1a'; ctx.fillRect(x + 15, y + 15, w - 30, h - 25);
+    for (let i = 0; i < 6; i++) {
+        let cx = x + (i * (w - 14) / 5);
+        ctx.fillStyle = '#b0b0b0'; ctx.fillRect(cx + 4, y + 10, 14, h - 15);
+        ctx.fillStyle = '#d0d0d0'; ctx.fillRect(cx + 4, y + 10, 4, h - 15);
+    }
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(x - 10, y - 5, w + 20, 20);
+    ctx.beginPath(); ctx.moveTo(x - 15, y - 5); ctx.lineTo(x + w + 15, y - 5); ctx.lineTo(x + w / 2, y - 65); ctx.closePath(); ctx.fill();
+   
+    // Ingresso Estetico
+    let time = Date.now() * 0.002;
+    let grad = ctx.createRadialGradient(x+w/2, y+h-30, 5, x+w/2, y+h-30, 50);
+    grad.addColorStop(0, `rgba(255, 215, 0, ${0.4 + Math.sin(time)*0.2})`);
+    grad.addColorStop(1, 'transparent');
+    ctx.fillStyle = grad;
+    ctx.fillRect(x+w/2-50, y+h-70, 100, 70);
+}
+
+// Modifica queste coordinate in room1Props
+const room1Props = [
+    // STATUA 1: TALETE
+    {
+        id: 'statue',
+        id_name: 'talete',
+        x: 230, y: 140, w: 60, h: 140,
+        color: '#3498db',
+        info: "Tutto è vivo e colmo di Dei. Ricerca la sostanza che scorre, muta forma ma mai svanisce: il principio è nell'acqua."
+    },
+    // STATUA 2: ANASSIMANDRO
+    {
+        id: 'statue',
+        id_name: 'anassimandro',
+        x: 910, y: 140, w: 60, h: 140,
+        color: '#9b59b6',
+        info: "Non cercarmi tra gli elementi finiti. La mia origine è l'Apeiron: l'infinito e l'indistinto da cui ogni cosa nasce e in cui ogni cosa torna."
+    },
+    // STATUA 3: ANASSIMENE
+    {
+        id: 'statue',
+        id_name: 'anassimene',
+        x: 570, y: 140, w: 60, h: 140,
+        color: '#bdc3c7',
+        info: "Come l'anima ci sostiene, così un soffio invisibile regge il mondo. Cerca il principio nell'invisibile che respiri e che tutto avvolge."
+    },
+    // ALTARE
+    {
+        id: 'altar',
+        x: 540, y: 440, w: 120, h: 90
+    }
+];
+
+function updateNearby() {
+    nearbyInteractable = null;
+    let px = player.x + 12;
+    let py = player.y + 30;
+    
+    // ========================================================
+    // CONTROLLI STANZA 1
+    // ========================================================
+    if (room === 1) {
+        let altar = room1Props.find(p => p.id === 'altar');
+        if (altar && puzzle.keyAppeared && !puzzle.hasKey) {
+            let dx = px - (altar.x + altar.w / 2);
+            let dy = py - (altar.y + altar.h);
+            let dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist < 120) {
+                nearbyInteractable = altar;
+                return;
+            }
+        }
+        room1Props.forEach(p => {
+            let dx, dy, dist;
+            if (p.id === 'statue') {
+                dx = px - (p.x + p.w / 2);
+                dy = py - (p.y + p.h + 10);
+                dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 65) nearbyInteractable = p;
+            }
+        });
+    }
+
+    // ========================================================
+    // CONTROLLI STANZA 2
+    // ========================================================
+    if (room === 2) {
+        if (typeof goldenKey !== 'undefined' && goldenKey.active && !goldenKey.collected) {
+            let dx = px - goldenKey.x;
+            let dy = py - goldenKey.y;
+            let dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist < 65) {
+                // Impostiamo sia id che id_name per evitare conflitti nei controlli successivi
+                nearbyInteractable = { id: 'goldenKey', id_name: 'goldenKey', x: goldenKey.x, y: goldenKey.y };
+                return;
+            }
+        }
+
+        // Controllo NPC standard Stanza 2
+        if (typeof room2NPCs !== 'undefined') {
+            room2NPCs.forEach(n => {
+                if (heraclitusGame.freeRoam && n.id_name !== 'eraclito') {
+                    return;
+                }
+                let dx = px - (n.x + n.w / 2);
+                let dy = py - (n.y + n.h + 10);
+                let dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 65) {
+                    nearbyInteractable = n;
+                }
+            });
+        }
+
+        // Eraclito Speciale
+        if (gameState === "heraclitus" && heraclitusGame.finalZone) {
+            const n = heraclitusGame.npc;
+            let dx = px - (n.x + n.w / 2);
+            let dy = py - (n.y + n.h);
+            let dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist < 90) {
+                nearbyInteractable = {
+                    id: 'npc',
+                    id_name: 'eraclito',
+                    info: "ERACLITO"
+                };
+            }
+        }
+
+        // Gestione vittoria finale Parmenide
+        if (parmenideGame.finalZone) {
+            parmenideGame.active = false;
+            parmenideGame.finalZone = false;
+            parmenideGame.completed = true;
+            gameState = "victory";
+
+            dialogue = [
+                "HAI COMPRESO L’ESSERE",
+                "TUTTO È IMMUTABILE"
+            ];
+            return;
+        }
+    }
+  // =========================================
+    // ROOM 3 (TRIBUNALE)
+    // =========================================
+    else if (room === 3) {
+        // Controllo della chiave di Socrate a terra
+        if (typeof roomKey !== 'undefined' && roomKey.visible && !roomKey.collected) {
+            const dx = (player.x + player.w / 2) - roomKey.x;
+            const dy = (player.y + player.h / 2) - roomKey.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist < 60) {
+                roomKey.visible = false;
+                roomKey.collected = true;
+                nearbyInteractable = null;
+                dialogue = ["Hai raccolto la Chiave del Destino di Socrate!", "Portala alla porta a Nord per avanzare."];
+                return;
+            }
+        }
+
+        // Interazione con Socrate per avviare il processo (lascia intatto il tuo raggio d'azione)
+     // Interazione con Socrate per avviare il processo (Aggiornato: si disattiva se hai finito!)
+        let socrateObj = (typeof room3NPCs !== 'undefined') ? room3NPCs.find(npc => npc.id_name === "socrate") : null;
+        if (socrateObj && gameState === "world") {
+            // 🛑 SE IL PROCESSO È FINITO (la chiave esiste già a terra o è raccolta), AZZERA TUTTO E DISATTIVA
+            if (typeof roomKey !== 'undefined' && (roomKey.visible || roomKey.collected)) {
+                if (nearbyInteractable === socrateObj) {
+                    nearbyInteractable = null;
+                }
+                canStartDialog = false;
+            } else {
+                // Se il processo NON è finito, calcola la distanza normalmente
+                let dx = px - (socrateObj.x + socrateObj.w / 2);
+                let dy = py - (socrateObj.y + socrateObj.h + 10);
+                let dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < 90) {
+                    nearbyInteractable = socrateObj;
+                    canStartDialog = true; // Sblocca la scritta [E] Aiuta Socrate
+                    return;
+                } else {
+                    // Se ti allontani prima di iniziare il processo, pulisci i puntatori
+                    if (nearbyInteractable === socrateObj) nearbyInteractable = null;
+                    canStartDialog = false;
+                }
+            }
+        }}
+        // Controllo NPC standard
+        room2NPCs.forEach(n => {
+            if (heraclitusGame.freeRoam && n.id_name !== 'eraclito') {
+                return;
+            }
+            let dx = px - (n.x + n.w / 2);
+            let dy = py - (n.y + n.h + 10);
+            let dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 65) {
+                nearbyInteractable = n;
+            }
+        });
+
+        // Eraclito Speciale
+        if (gameState === "heraclitus" && heraclitusGame.finalZone) {
+            const n = heraclitusGame.npc;
+            let dx = px - (n.x + n.w / 2);
+            let dy = py - (n.y + n.h);
+            let dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist < 90) {
+                nearbyInteractable = {
+                    id: 'npc',
+                    id_name: 'eraclito',
+                    info: "ERACLITO"
+                };
+            }
+        }
+
+        // Gestione vittoria finale Parmenide
+        if (parmenideGame.finalZone) {
+            parmenideGame.active = false;
+            parmenideGame.finalZone = false;
+            parmenideGame.completed = true;
+            gameState = "victory";
+
+            dialogue = [
+                "HAI COMPRESO L’ESSERE",
+                "TUTTO È IMMUTABILE"
+            ];
+            return;
+        }
+    }
+
+// Definizione dei pilastri (rimane invariata come da tua richiesta)
+const pillars = [[80,80], [1120,80], [400,180], [800,180], [80,420], [1120,420]];
+
+function drawFlame(x, y) {
+    let t = Date.now() * 0.008;
+    let flicker = Math.sin(t * 10) * 3;
+    // Alone di luce soffusa
+    let g = ctx.createRadialGradient(x, y-20, 0, x, y-20, 80);
+    g.addColorStop(0, 'rgba(255, 150, 0, 0.2)');
+    g.addColorStop(1, 'transparent');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y-20, 80, 0, Math.PI*2); ctx.fill();
+   
+    // Fiamma
+    ctx.fillStyle = '#ff6600';
+    ctx.beginPath();
+    ctx.moveTo(x-6, y);
+    ctx.bezierCurveTo(x-10, y-15, x+4, y-25+flicker, x, y-35+flicker);
+    ctx.bezierCurveTo(x+10, y-20, x+8, y-10, x+6, y);
+    ctx.fill();
+    ctx.fillStyle = '#ffcc00';
+    ctx.beginPath(); ctx.arc(x, y-10, 4, 0, Math.PI*2); ctx.fill();
+}
+
+function drawClassicColumn(x, y) {
+    // Base
+    ctx.fillStyle = '#444'; ctx.fillRect(x-25, y+120, 50, 15);
+    // Corpo con scanalature
+    ctx.fillStyle = '#888'; ctx.fillRect(x-20, y, 40, 120);
+    ctx.strokeStyle = '#555'; ctx.lineWidth = 2;
+    for(let i=-12; i<=12; i+=8) { ctx.beginPath(); ctx.moveTo(x+i, y+5); ctx.lineTo(x+i, y+115); ctx.stroke(); }
+    // Capitello
+    ctx.fillStyle = '#aaa'; ctx.fillRect(x-25, y-5, 50, 15);
+    drawFlame(x, y-10);
+}
+
+function drawNobleStatue(p) {
+    const {x, y, w, h, color} = p;
+    ctx.save();
+    // 1. BASAMENTO
+    ctx.fillStyle = '#333'; ctx.fillRect(x-10, y+h-20, w+20, 25);
+    ctx.fillStyle = '#555'; ctx.fillRect(x-5, y+h-35, w+10, 15);
+    // 2. ALONE TIPO FIAMMA (Solo se risolta)
+    if(puzzle.solvedQuizzes.includes(p.id_name)) {
+        ctx.save();
+        // L'effetto 'lighter' rende il colore brillante come una sorgente luminosa
+        ctx.globalCompositeOperation = 'lighter';
+       
+        // Creiamo il gradiente circolare (l'alone)
+        // Parte dal centro della statua (x + w/2, y + h/2)
+        let glow = ctx.createRadialGradient(
+            x + w/2, y + h/2, 5,   // Cerchio interno
+            x + w/2, y + h/2, 100  // Raggio dell'alone (regolabile)
+        );
+        glow.addColorStop(0, color);           // Colore pieno al centro
+        glow.addColorStop(0.3, color);         // Mantiene il colore per un po'
+        glow.addColorStop(1, 'transparent');   // Sfuma nel buio
+        ctx.fillStyle = glow;
+        ctx.globalAlpha = 0.6; // Opacità dell'alone
+        ctx.beginPath();
+        ctx.arc(x + w/2, y + h/2, 100, 0, Math.PI * 2);
+        ctx.fill();
+        // 3. LA CORNICE RETTANGOLARE COLORATA (Che avevi chiesto)
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = color;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 4;
+        ctx.globalAlpha = 1.0;
+        ctx.strokeRect(x+5, y+5, w-10, h-45);
+        ctx.restore();
+    }
+    // 4. FORMA UMANA (Toga/Marmo) - Ripristinata esattamente come l'avevi
+    ctx.fillStyle = '#dcdde1';
+    ctx.beginPath();
+    ctx.moveTo(x+w/2-20, y+40);
+    ctx.lineTo(x+w/2+20, y+40);
+    ctx.lineTo(x+w, y+h-35);
+    ctx.lineTo(x, y+h-35);
+    ctx.closePath();
+    ctx.fill();
+    // Dettagli toga
+    ctx.strokeStyle = '#b2bec3';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x+w/2, y+45);
+    ctx.lineTo(x+w/2-10, y+h-35);
+    ctx.stroke();
+    // Testa
+    ctx.fillStyle = '#ececec';
+    ctx.beginPath();
+    ctx.arc(x+w/2, y+25, 18, 0, Math.PI*2);
+    ctx.fill();
+    // Naso/Dettaglio volto
+    ctx.fillStyle = '#b2bec3';
+    ctx.fillRect(x+w/2-2, y+22, 4, 10); 
+    ctx.restore();
+}
+   
+function drawKeyShape(x, y, angle = 0) {
+    ctx.save();
+    ctx.translate(x, y); ctx.rotate(angle);
+    ctx.fillStyle = '#f1c40f';
+    ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI*2); ctx.fill();
+    ctx.fillRect(8, -2, 18, 4);
+    ctx.restore();
+}
+function drawExitDoor() {
+    const x = 540, y = 0, w = 120, h = 60;
+    ctx.fillStyle = '#2c3e50'; ctx.fillRect(x-10, y, w+20, h+10);
+    ctx.fillStyle = puzzle.doorOpen ? '#d4af37' : '#4e342e';
+    ctx.fillRect(x, y, w/2-2, h); ctx.fillRect(x+w/2+2, y, w/2-2, h);
+    if(puzzle.hasKey && player.y < 80 && player.x > 500 && player.x < 700) {
+        puzzle.doorOpen = true;
+        puzzle.hasKey = false;
+    }
+}
+function drawPlayer(x, y) {
+    const walkOffset = player.isMoving ? Math.sin(player.walkCycle) * 6 : 0;
+    ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(x+12, y+34, 12, 5, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#3e2723'; ctx.fillRect(x+4, y+24 + walkOffset, 6, 10); ctx.fillRect(x+14, y+24 - walkOffset, 6, 10);
+    ctx.fillStyle = '#f5f5f5'; ctx.fillRect(x, y+10, 24, 18);
+    ctx.fillStyle = '#e0ac69'; ctx.fillRect(x+4, y, 16, 16);
+    ctx.fillStyle = '#4e342e'; ctx.fillRect(x+4, y-2, 16, 6);
+    ctx.fillStyle = '#000';
+    let eyeX = (player.dir === 'd') ? 3 : (player.dir === 'a' ? -3 : 0);
+    ctx.fillRect(x+7+eyeX, y+7, 2, 2); ctx.fillRect(x+13+eyeX, y+7, 2, 2);
+     // 🔥 Non disegnare il player nella schermata finale Platone
+    if (gameState === "platoWin") return;
+
+}
+
+function drawInputBox() {
+    if(!isTyping) return;
+    ctx.fillStyle = 'rgba(0,0,0,0.95)'; ctx.fillRect(350, 200, 500, 140);
+    ctx.strokeStyle = '#c9b27a'; ctx.lineWidth = 3; ctx.strokeRect(350, 200, 500, 140);
+    ctx.fillStyle = '#fff'; ctx.font = '22px Georgia'; ctx.textAlign = 'center';
+    ctx.fillText("NOME DEL FILOSOFO:", 600, 250);
+    ctx.fillStyle = '#f1c40f'; ctx.font = 'bold 32px Georgia';
+    ctx.fillText(currentInput.toUpperCase() + "|", 600, 300);
+    ctx.textAlign = 'start';
+}
+
+function drawDialogue() {
+    if (!dialogue) return;
+    // Reset fondamentale degli allineamenti
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    // Disegno del Box
+    ctx.fillStyle = 'rgba(10, 10, 20, 0.95)';
+    ctx.strokeStyle = '#c9b27a';
+    ctx.lineWidth = 4;
+    ctx.fillRect(100, 420, 1000, 200); // Box leggermente più alto
+    ctx.strokeRect(100, 420, 1000, 200);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '20px Georgia'; // Font leggermente ridotto per le domande lunghe  
+    let startX = 130;
+    let startY = 445;
+    let maxWidth = 940;
+    let currentY = startY;
+    // Calcolo dinamico dell'altezza della linea (se ci sono tante righe, le stringe)
+    let totalLinesNeeded = 0;
+    dialogue.forEach(text => {
+        let words = text.split(' ');
+        let line = '';
+        for (let n = 0; n < words.length; n++) {
+            let testLine = line + words[n] + ' ';
+            if (ctx.measureText(testLine).width > maxWidth && n > 0) {
+                totalLinesNeeded++;
+                line = words[n] + ' ';
+            } else {
+                line = testLine;
+            }
+        }
+        totalLinesNeeded++;
+    });
+    // Se le righe sono troppe, abbassa l'interlinea (lineHeight)
+    let lineHeight = totalLinesNeeded > 6 ? 24 : 28;
+  // Disegno effettivo con Word-Wrap
+    dialogue.forEach(text => {
+        let words = text.split(' ');
+        let line = '';
+        for (let n = 0; n < words.length; n++) {
+            let testLine = line + words[n] + ' ';
+            let metrics = ctx.measureText(testLine);
+           
+            if (metrics.width > maxWidth && n > 0) {
+                ctx.fillText(line, startX, currentY);
+                line = words[n] + ' ';
+                currentY += lineHeight;
+            } else {
+                line = testLine;
+            }
+        }
+        ctx.fillText(line, startX, currentY);
+        currentY += lineHeight; // Spazio tra paragrafi
+    });
+}
+
+// --- DATI SPECIFICI STANZA 2 ---
+const room2Pillars = [];
+// Cambiato da colXconst a colXPositions e allargato i lati (80 e 1120)
+const colXPositions = [80, 600, 1120];
+colXPositions.forEach(x => {
+    if (x === 600) {
+        // FILA CENTRALE: Solo due colonne (Sopra e Sotto)
+        room2Pillars.push({ x: x, y: 70 });
+        room2Pillars.push({ x: x, y: 280 }); // Abbassata per non bloccare il centro
+    } else {
+        // FILE LATERALI: Tre colonne
+        room2Pillars.push({ x: x, y: 70 });
+        room2Pillars.push({ x: x, y: 280 });
+        room2Pillars.push({ x: x, y: 490 });
+    }
+});
+const room2NPCs = [
+    {
+        id: 'npc', id_name: 'eraclito',
+        x: 335, y: 40, w: 34, h: 44, // Dimensioni simili al player
+        color: '#e67e22', // Toga arancione
+        info: "Vedi quel fiume? Tutto scorre, viandante. Non puoi fermare il tempo, così come non puoi bagnarti due volte nella stessa acqua. Naviga nel fiume in continuo movimento e trova gli opposti che coesistono. Premi [P] per fare partire il minigioco!"
+    },
+    {
+        id: 'npc', id_name: 'parmenide',
+        x: 850, y: 40, w: 34, h: 44,
+        color: '#f1c40f', // Toga gialla
+        info: "Non ascoltare i sensi, ti ingannano. L'essere è immobile, eterno e immutabile. Tutto il resto è solo un'illusione."
+    }
+];
+const room3NPCs = [
+    {
+        id: 'npc', 
+        id_name: 'socrate',
+        x: 400, 
+        y: 180, 
+        w: 50, 
+        h: 80, // Dimensioni perfette per la tua funzione drawPhilosopherCourt
+        info: "Socrate ha bisogno del tuo aiuto per difendersi dalle accuse."
+    },
+    {
+        id: 'npc', 
+        id_name: 'meleto',
+        x: 750, 
+        y: 180, 
+        w: 50, 
+        h: 80, // Stesse dimensioni per evitare bug grafici
+        info: "Meleto osserva la giuria con sguardo severo."
+    }
+];
+
+let heraclitusGame = {
+    active: false,
+    lanes: 2,
+    currentLane: 0,
+    guideWord: "",
+    options: [],
+    timer: 300,
+    maxTimer: 300,
+    progress: 0,
+    mistakes: 0,
+    flash: null,
+    flashTimer: 0,
+    scrollY: 0,
+   completed: false,
+    lockCollision: false,  
+    evaluated: false,  
+    position: 0,
+    lives: 2,
+    step: 120,
+    round: 0,
+    won: false,
+    ending: false,
+    freeRoam: false,
+won: false,
+lockInput: false,
+postWin: false,
+finalZone: false,
+completed: false,
+logostextShown: false,
+logoMessageTimer: 0,
+npc: {
+    id_name: 'eraclito',
+    x: 580,
+    y: 120,
+    w: 40,
+    h: 60,
+    npcPlayerX: 588,
+npcPlayerY: 420,
+}
+};
+heraclitusGame.progressPos = 0; // posizione verticale
+heraclitusGame.lives = 2;
+heraclitusGame.lanes = 2;
+// =========================
+// PARMENIDE GAME
+// =========================
+let parmenideGame = {
+    active: false,
+    completed: false,
+    gameOver: false,
+    won: false,        // Diventa true quando indovini il terzo round
+    round: 1,
+    phase: 0,
+    timer: 0,
+    lives: 2,          // Vite per il Game Over
+    maxLives: 2,
+    correctDoor: 0,
+    selectedDoor: null,
+    phaseDuration: {
+        observe: 180,
+        change: 45
+    },
+    objects: ["door", "pillar", "artifact"],
+    result: null, // "win" | "lose"
+    showResultTimer: 0,
+    logoMessageTimer: 0 // Gestisce la comparsa della scritta a schermo intero
+};
+// Questo oggetto invece può stare qui sotto senza problemi
+let philosophersCompleted = {
+    eraclito: false,
+    parmenide: false
+};
+
+function getCurrentObject() {
+    return parmenideGame.objects[parmenideGame.round - 1];
+}
+
+function startParmenideGame() {
+    parmenideGame.active = true;
+    parmenideGame.gameOver = false;
+    parmenideGame.won = false;
+    parmenideGame.round = 1;
+    parmenideGame.lives = parmenideGame.maxLives;
+    startObservePhase();
+}
+
+function startObservePhase() {
+    parmenideGame.phase = 1;
+    parmenideGame.result = null;   // 🔥 IMPORTANTISSIMO
+    parmenideGame.selectedDoor = null;
+    parmenideGame.timer =
+        parmenideGame.phaseDuration.observe;
+
+    parmenideGame.correctDoor =
+        Math.floor(Math.random() * 3);
+}
+
+function startChangePhase() {
+    parmenideGame.phase = 2;
+    parmenideGame.timer =
+        parmenideGame.phaseDuration.change;
+}
+
+function startChoicePhase() {
+    parmenideGame.phase = 3;
+}
+
+function updateParmenideGame() {
+    if (!parmenideGame.active) return;
+    if (parmenideGame.gameOver) return;
+    if (parmenideGame.won) return; // Blocca gli aggiornamenti se hai vinto
+
+    if (parmenideGame.phase === 1) {
+        parmenideGame.timer--;
+        if (parmenideGame.timer <= 0) startChangePhase();
+    }
+    else if (parmenideGame.phase === 2) {
+        parmenideGame.timer--;
+        if (parmenideGame.timer <= 0) startChoicePhase();
+    }
+    else if (parmenideGame.phase === 4) {
+        parmenideGame.showResultTimer--;
+        if (parmenideGame.showResultTimer <= 0) {
+            if (parmenideGame.result === "lose") {
+                parmenideGame.lives--;
+                if (parmenideGame.lives <= 0) {
+                    parmenideGame.gameOver = true;
+                } else {
+                    startObservePhase(); // Riprova il round corrente
+                }
+            } else {
+                // Se è l'ultimo round e abbiamo indovinato, attiviamo la vittoria
+                if (parmenideGame.round === 3) {
+                    parmenideGame.won = true;
+                    parmenideGame.logoMessageTimer = 9999; // Resta visibile finché non premi E
+                } else {
+                    nextRound();
+                }
+            }
+        }
+    }
+}
+
+function chooseDoor(index) {
+    if (parmenideGame.phase !== 3 || parmenideGame.gameOver || parmenideGame.won) return;
+    parmenideGame.selectedDoor = index;
+    
+    if (index === parmenideGame.correctDoor) {
+        parmenideGame.result = "win";
+    } else {
+        parmenideGame.result = "lose";
+    }
+    startResultPhase();
+}
+
+function startResultPhase() {
+    parmenideGame.phase = 4;
+    parmenideGame.showResultTimer = 120; // 2 secondi
+}
+
+function nextRound() {
+    parmenideGame.round++;
+    parmenideGame.phase = 0;
+    parmenideGame.timer = 0;
+    parmenideGame.result = null;
+
+    // VITTORIA: Superato il Round 3 (Artifacts)
+    if (parmenideGame.round > 3) {
+        parmenideGame.active = false; // Disattiva il minigioco a schermo intero
+        parmenideGame.completed = true;
+        parmenideGame.won = true;
+        philosophersCompleted.parmenide = true;
+
+        gameState = "world"; // Riporta il giocatore nella Room 2 libera
+        
+        // Riposiziona il player davanti a Parmenide nel mondo reale
+        player.x = 800; // Metti le coordinate corrette del tuo NPC Parmenide nella mappa
+        player.y = 300; 
+
+        parmenideGame.logostextShown = false; // Resetta per permettere al check di parlare
+        checkGoldenKeyUnlock(); // <--- CHIAMA SUBITO IL CONTROLLO CHIAVE
+        return;
+    }
+    startObservePhase();
+}
+
+function endParmenideGame() {
+    parmenideGame.active = false;
+    parmenideGame.completed = true;
+
+dialogue = [
+    "PARMENIDE: Il divenire è illusione.",
+    "Hai compreso il vero senso dell'essere."
+];
+}
+
+function drawParmenideGame() {
+    if (!parmenideGame.active) return;
+
+    // 💀 1. SCHERMATA GAME OVER (Se hai esaurito le vite)
+    if (parmenideGame.gameOver) {
+        ctx.fillStyle = 'rgba(0,0,0,0.85)';
+        ctx.fillRect(0, 0, 1200, 640);
+        ctx.fillStyle = '#e74c3c';
+        ctx.font = 'bold 64px Georgia';
+        ctx.textAlign = 'center';
+        ctx.fillText("L'ILLUSIONE TI HA SMARRITO", 600, 260);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '28px Georgia';
+        ctx.fillText('Premi SPACE per riprovare la Via della Verità', 600, 340);
+        return; 
+    }
+
+    // 🏛️ 2. SFONDO E OGGETTI ORIGINALI DEL MINIGIOCO (Senza modifiche strutturali)
+    ctx.fillStyle = "#8b7d6b";
+    ctx.fillRect(0, 0, 1200, 640);
+
+    ctx.fillStyle = "black";
+    ctx.font = "40px serif";
+    ctx.textAlign = "center";
+
+    if (parmenideGame.phase === 1) {
+        ctx.fillText("OSSERVA ATTENTAMENTE", 600, 80);
+        ctx.fillText(Math.ceil(parmenideGame.timer / 60), 600, 130);
+    }
+    else if (parmenideGame.phase === 2) {
+        ctx.fillText("OSSERVA IL CAMBIAMENTO", 600, 80);
+        ctx.fillText(Math.ceil(parmenideGame.timer / 60), 600, 130);
+    }
+    else if (parmenideGame.phase === 3) {
+        ctx.fillText("SCEGLI LA PORTA IMMUTATA", 600, 80);
+    }
+    else if (parmenideGame.phase === 4) {
+        ctx.fillText(parmenideGame.result === "win" ? "CORRETTO" : "SBAGLIATO", 600, 120);
+    }
+
+    // Disegna sempre le porte/pilastri/artefatti sotto
+    drawRoundObjects();
+
+    // 🏆 3. SCHERMATA DI VITTORIA (Copre il minigioco alla fine del round 3)
+    if (parmenideGame.won && parmenideGame.logoMessageTimer > 0) {
+        ctx.fillStyle = 'rgba(0,0,0,0.75)';
+        ctx.fillRect(0, 0, 1200, 640);
+        ctx.fillStyle = '#f1c40f'; // Giallo Oro
+        ctx.font = 'bold 38px Georgia'; // 🔥 Rimpicciolito da 52px a 38px per non far tagliare la scritta
+        ctx.textAlign = 'center';
+        ctx.fillText("HAI SCOPERTO LE VERE ESSENZE DELL'ESSERE", 600, 300);
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '24px Georgia';
+        ctx.fillText("Premi E per uscire", 600, 380);
+    }
+}
+
+function drawRoundObjects() {
+  if (!parmenideGame.active) return;
+
+  if (parmenideGame.round === 1) {
+        drawDoors();
+    }
+
+  else if (parmenideGame.round === 2) {
+        drawPillars();
+    }
+
+  else if (parmenideGame.round === 3) {
+        drawArtifacts();
+    }
+}
+
+function drawDoors() {
+    const count = 3;
+    const doorWidth = 120;
+    const spacing = 450;
+    const totalWidth = (count - 1) * spacing + doorWidth;
+const startX =
+    (1200 - totalWidth) / 2;
+  for (let i = 0; i < count; i++) {
+        let x = startX + i * spacing;
+        ctx.fillStyle = "#5c3b1e";
+        ctx.fillRect(x, 220, doorWidth, 220);
+        ctx.strokeStyle = "black";
+        ctx.lineWidth = 5;
+        ctx.strokeRect(x, 220, doorWidth, 220);
+        ctx.beginPath();
+        ctx.arc(x + 95, 330, 6, 0, Math.PI * 2);
+        ctx.fillStyle = "gold";
+        ctx.fill();
+        // cambiamento fase 2
+        if (parmenideGame.phase === 2) {
+            if (i !== parmenideGame.correctDoor) {
+                ctx.fillStyle = "rgba(255,255,255,0.35)";
+                ctx.fillRect(x, 220, doorWidth, 220);
+            }
+        }
+        ctx.fillStyle = "black";
+        ctx.font = "30px serif";
+        ctx.fillText(i + 1, x + doorWidth / 2, 490);
+    }
+}
+
+function drawPillars() {
+    const count = 3;
+    const w = 80;
+    const h = 260;
+    const spacing = 450;
+    const totalWidth = (count - 1) * spacing + w;
+    const startX = (1200 - totalWidth) / 2;
+    for (let i = 0; i < count; i++) {
+        let x = startX + i * spacing;
+        ctx.fillStyle = "#b5b5b5";
+        ctx.fillRect(x, 200, w, h);
+        ctx.strokeStyle = "#333";
+        ctx.strokeRect(x, 200, w, h);
+        // cambiamento PIÙ SUBTLE
+        if (parmenideGame.phase === 2 && i !== parmenideGame.correctDoor) {
+            ctx.globalAlpha = 0.85;
+            ctx.fillStyle = "#d0d0d0";
+            ctx.fillRect(x, 200, w, h);
+            ctx.globalAlpha = 1;
+        }
+
+        ctx.fillStyle = "black";
+        ctx.font = "30px serif";
+        ctx.fillText(i + 1, x + 40, 500);
+    }
+}
+
+function drawArtifacts() {
+    const count = 3;
+    const size = 120;
+    const spacing = 450;
+    const totalWidth = (count - 1) * spacing + size;
+    const startX = (1200 - totalWidth) / 2;
+    for (let i = 0; i < count; i++) {
+        let x = startX + i * spacing;
+        ctx.fillStyle = "#6b4f3a";
+        ctx.beginPath();
+        ctx.arc(x + 60, 300, size / 2, 0, Math.PI * 2);
+        ctx.fill();
+        // CAMBIAMENTO MINIMO
+        if (parmenideGame.phase === 2 && i !== parmenideGame.correctDoor) {
+            ctx.strokeStyle = "rgba(255,255,255,0.2)";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+        ctx.fillStyle = "black";
+        ctx.font = "30px serif";
+        ctx.fillText(i + 1, x + 60, 500);
+    }
+}
+
+function setupRoom3Collisions() {
+    room3Collisions = [
+        // GIURIA: Abbassata l'altezza (h) e alzata la Y per bloccare solo il bancone reale
+        {x: 390, y: 80, w: 420, h: 30},      
+
+        // PUBBLICO SINISTRA & DESTRA: Ridotta l'altezza per permettere di camminare sotto di loro
+        {x: 120, y: 310, w: 400, h: 465},    
+        {x: 660, y: 310, w: 420, h: 465},    
+
+        // SOCRATE & MELETO: Ora la collisione è solo un piccolo blocco ai loro piedi (Y aumentata, W e H ridotte)
+        {x: 395, y: 200, w: 50, h: 70},     // Socrate (piedi)
+        {x: 745, y: 200, w: 50, h: 70},     // Meleto (piedi)
+
+        // COLONNE SINISTRA: Stringiamo la larghezza (w) e l'altezza (h) per girarci intorno
+        {x: 50, y: 230, w: 40, h: 40},     
+        {x: 50, y: 410, w: 40, h: 40},
+        {x: 50, y: 590, w: 40, h: 40},
+
+        // COLONNE DESTRA
+        {x: 1110, y: 230, w: 40, h: 40},   
+        {x: 1110, y: 410, w: 40, h: 40},
+        {x: 1110, y: 590, w: 40, h: 40},
+    ];
+}
+
+function canMoveHere(x, y) {
+    if (room === 3) {
+        for (let obj of room3Collisions) {
+            if (x > obj.x && x < obj.x + obj.w &&
+                y > obj.y && y < obj.y + obj.h) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+function move() {
+ function move() {
+    // ========================================================
+    // 🏛️ MOVIMENTO CORRETTO MINIGIOCO PLATONE
+    // ========================================================
+    if (gameState === "platoGame") {
+        // Se siamo nel minigioco, usiamo la logica di movePlayer definita sotto
+        if (typeof movePlayer === 'function') {
+            movePlayer(0, 0); // Esegue il movimento specifico di Platone
+        }
+        return; // Esce per non attivare i movimenti delle stanze standard
+    }
+}
+
+    // 🛑 SCUDO GLOBALE: Blocca il movimento se ci sono dialoghi o se le intro sono attive
+   // 🛑 SCUDO GLOBALE: Blocca il movimento se ci sono dialoghi o se le intro sono attive
+    if (isTyping || isReflecting || dialogue || gameState === "room1_intro" || gameState === "room2_intro" || gameState === "room3_intro" || gameState === "room4_intro") return;
+    let dx = 0;
+    let dy = 0;
+    player.isMoving = false;
+    
+    const up = keys["w"] || keys["arrowup"];
+    const down = keys["s"] || keys["arrowdown"];
+    const left = keys["a"] || keys["arrowleft"];
+    const right = keys["d"] || keys["arrowright"];
+    let s = player.speed;
+    
+    if (up) { dy = -s; player.dir = 'w'; player.isMoving = true; }
+    if (down) { dy = s; player.dir = 's'; player.isMoving = true; }
+    if (left) { dx = -s; player.dir = 'a'; player.isMoving = true; }
+    if (right) { dx = s; player.dir = 'd'; player.isMoving = true; }
+    
+    player.walkCycle += 0.2;
+    stepCounter++;
+    if (stepCounter > 55) {
+        canReflect = true;
+    }
+
+    let nx = player.x + dx;
+    let ny = player.y + dy;
+    let canMove = true;
+    
+    // ========================================================
+    // ROOM 0 (Esterno)
+    // ========================================================
+    if (room === 0) {
+        if (!isWalkableRect(nx, ny, player.w, player.h) || coll(nx, ny)) {
+            canMove = false;
+        }
+        // 🚪 CAMBIO STANZA: Da Esterno a Tempio (Stanza 1)
+        if (player.x > 26 * TS) {
+            room = 1;
+            gameState = "room1_intro"; 
+            player.x = 600;
+            player.y = 560;
+            return;
+        }
+    }
+    // ========================================================
+    // ROOM 1 (Tempio)
+    // ========================================================
+    else if (room === 1) {
+        for (let p of room1Props) {
+            if (nx + 20 > p.x && nx < p.x + p.w && ny + 30 > p.y && ny < p.y + p.h) {
+                canMove = false;
+            }
+        }
+        if (nx < 20 || nx > 1160 || ny < 10 || ny > 600) {
+            canMove = false;
+        }
+        // 🚪 CAMBIO STANZA: Da Stanza 1 a Stanza 2 con Schermata Intro
+        if (puzzle.doorOpen && ny < 20 && nx > 540 && nx < 660) {
+            room = 2;
+            gameState = "room2_intro"; 
+            player.x = 600;
+            player.y = 560;
+            return;
+        }
+    }
+    // ========================================================
+    // ROOM 2 (Muri perimetrali calibrati al millimetro)
+    // ========================================================
+    else if (room === 2) {
+        // 1. CONFINI PERIMETRALI MORBIDI
+        if (nx < 10) nx = 10;
+        if (nx > 1170) nx = 1170;
+        if (ny > 590) ny = 590;
+
+        // 2. PARETE NORD
+        if (ny < 20) {
+            if (nx > 520 && nx < 680) {
+                // Se la chiave d'oro è stata raccolta, passa alla stanza 3 attivando l'intro
+                if (goldenKey && (goldenKey.collected || goldenKey.followPlayer)) {
+                    room = 3;
+                    gameState = "room3_intro"; // ✨ Attiva l'intro di Socrate prima di farti muovere!
+                    if (typeof setupRoom3Collisions === 'function') setupRoom3Collisions();
+                    player.x = 600;
+                    player.y = 560;
+                    return; 
+                } else {
+                    ny = 20;
+                }
+            } else {
+                ny = 20;
+            }
+        }
+
+        // 3. COLLISIONI CON PROPS / PILASTRI STANZA 2
+        if (typeof room2Props !== 'undefined') {
+            for (let p of room2Props) {
+                if (nx + 20 > p.x && nx < p.x + p.w && ny + 30 > p.y && ny < p.y + p.h) {
+                    canMove = false;
+                }
+            }
+        }
+    }
+ // ========================================================
+    // ROOM 3 (Tribunale / Socrate)
+    // ========================================================
+    else if (room === 3) {
+        // Bordi Mappa
+        if (nx < 20 || nx + player.w > 1180 || ny < 20 || ny + player.h > 620) {
+            canMove = false;
+        }
+
+        // HITBOX PIEDI GIOCATORE
+        let pFeetX = nx + 4;                 
+        let pFeetW = player.w - 8;           
+        let pFeetY = ny + (player.h - 15);   
+        let pFeetH = 15;                     
+
+        // Collisioni con gli oggetti della stanza 3
+        if (typeof room3Collisions !== 'undefined') {
+            for (let obj of room3Collisions) {
+                if (
+                    pFeetX + pFeetW > obj.x &&
+                    pFeetX < obj.x + obj.w &&
+                    pFeetY + pFeetH > obj.y &&
+                    pFeetY < obj.y + obj.h
+                ) {
+                    canMove = false;
+                }
+            }
+        }
+
+        // 🚪 CAMBIO STANZA: Controllo della porta di Socrate a Nord -> Passaggio a Stanza 4
+        if (ny < 40 && nx > 540 && nx < 660) {
+            if (typeof roomKey !== 'undefined' && roomKey.collected) {
+                if (typeof room3Door !== 'undefined' && !room3Door.open) {
+                    room3Door.open = true;
+                    canMove = false;
+                } else {
+                    // == PASSAGGIO ALLA STANZA 4 ==
+                    room = 4;
+                    gameState = "room4_intro"; // ✨ Attiva l'intro di Platone bloccando il movimento!
+                    if (typeof setupRoom4Collisions === 'function') setupRoom4Collisions(); 
+                    player.x = 600;
+                    player.y = 500; 
+                    return;
+                }
+            } else {
+                canMove = false; // Muro se non hai la chiave
+            }
+        }
+    } // Fine Room 3
+    
+    // ========================================================
+    // ROOM 4 (Stanza di Platone)
+    // ========================================================
+    // ========================================================
+    // ROOM 4 (Stanza di Platone) - CONTROLLO PORTA FINALE
+    // ========================================================
+    else if (room === 4) {
+        // Bordi della mappa
+        if (nx < 20 || nx + player.w > 1180 || ny < 20 || ny + player.h > 620) {
+            canMove = false;
+        }
+
+        // Definizione hitbox piedi per gli oggetti di Room 4
+        let pFeetX = nx + 4;                 
+        let pFeetW = player.w - 8;           
+        let pFeetY = ny + (player.h - 15);   
+        let pFeetH = 15;                     
+
+        if (typeof room4Collisions !== 'undefined') {
+            for (let obj of room4Collisions) {
+                if (pFeetX + pFeetW > obj.x && pFeetX < obj.x + obj.w && pFeetY + pFeetH > obj.y && pFeetY < obj.y + obj.h) {
+                    canMove = false;
+                }
+            }
+        }
+
+        // 🚪 PORTA FINALE DI PLATONE: Uscita verso la Vittoria (Nord, centro schermo)
+        if (ny < 40 && nx > 540 && nx < 660) {
+            // Se preferisci inserire un controllo (es. se ha completato l'enigma), aggiungilo qui. 
+            // Altrimenti, l'attraversamento sblocca direttamente la vittoria:
+            gameState = "victory"; 
+            canMove = false;
+            return;
+        }
+    }
+
+    // ========================================================
+    // APPLICAZIONE DEL MOVIMENTO FINALE (Eseguito a fine controlli)
+    // ========================================================
+    if (canMove) {
+        player.x = nx;
+        player.y = ny;
+    }
+}
+
+function updateHeraclitusGame() {
+    if (!heraclitusGame.active) return;
+    if (heraclitusGame.gameOver) return;
+    if (heraclitusGame.won) return;
+    // TIMER SOLO SE NON IN FREE ROAM
+    if (!heraclitusGame.freeRoam) {
+        heraclitusGame.scrollY += 6;
+        heraclitusGame.timer--;
+        if (heraclitusGame.timer <= 0) {
+            heraclitusGame.timer = heraclitusGame.maxTimer;
+            evaluateHeraclitusAnswer();
+            nextHeraclitusRound();
+        }
+    }
+}
+
+
+function evaluateHeraclitusAnswer() {
+    let playerLane = heraclitusGame.currentLane;
+    let chosenWord = heraclitusGame.options[playerLane];
+    let correctWord = heraclitusGame.answerMap?.[heraclitusGame.guideWord];
+    if (!chosenWord || heraclitusGame.evaluated) return;
+    
+    heraclitusGame.evaluated = true;
+    let isCorrect = (chosenWord === correctWord);
+
+    if (isCorrect) {
+        heraclitusGame.flash = 'green';
+        heraclitusGame.flashTimer = 10;
+        clearTimeout(heraclitusGame.flashTimeout);
+        heraclitusGame.flashTimeout = setTimeout(() => { heraclitusGame.flash = null; }, 150);
+        heraclitusGame.progress++;
+        heraclitusGame.progressPos -= 1;
+
+        // 🔥 VERIFICA VITTORIA MINIGIOCO ERACLITO (RIPARATA)
+        // VERIFICA VITTORIA MINIGIOCO ERACLITO
+        if (heraclitusGame.progress >= 4) {
+            heraclitusGame.won = true;
+            heraclitusGame.active = false;
+            heraclitusGame.completed = true;
+            heraclitusGame.finalZone = false;
+            heraclitusGame.freeRoam = false;
+            heraclitusGame.postWin = false;
+            
+            philosophersCompleted.eraclito = true;
+            gameState = "world"; // Torna alla mappa
+
+            heraclitusGame.guideWord = "";
+            heraclitusGame.options = [];
+            heraclitusGame.currentLane = 0;
+            heraclitusGame.logostextShown = false; 
+
+            // 🔥 PASSIAMO "eraclito" ALLA FUNZIONE DELLA CHIAVE
+            checkGoldenKeyUnlock("eraclito");
+            
+            if (typeof updateNearby === 'function') updateNearby();
+            return;
+        }
+
+        if (heraclitusGame.lanes < 5) heraclitusGame.lanes++;
+    } else {
+        heraclitusGame.flash = 'red';
+        heraclitusGame.progressPos += 1;
+        heraclitusGame.mistakes++;
+        heraclitusGame.lives--;
+        if (heraclitusGame.lives <= 0) {
+            heraclitusGame.gameOver = true;
+            heraclitusGame.flashTimer = 20;
+            return;
+        }
+    }
+    heraclitusGame.flashTimer = 20;
+}
+
+function drawPhilosopher(npc) {
+    ctx.save();
+    const w = npc.w; // 32
+    const h = npc.h; // 45
+
+    // 1. OMBRA (come il player)
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.beginPath();
+    ctx.ellipse(npc.x + w/2, npc.y + h - 2, w/1.5, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 2. TOGA (Corpo a blocchi stile player)
+    // Eraclito: Marrone scuro/fumo | Parmenide: Blu notte/grigio solenne
+    ctx.fillStyle = (npc.id_name === 'eraclito') ? '#4a3728' : '#2c3e50';
+    ctx.fillRect(npc.x, npc.y + 18, w, h - 20);
+   
+    // Bordo della toga (un dettaglio di classe)
+    ctx.fillStyle = (npc.id_name === 'eraclito') ? '#e67e22' : '#f1c40f'; // Arancio vs Oro
+    ctx.fillRect(npc.x, npc.y + h - 5, w, 5);
+
+    // 3. TESTA (Stesse proporzioni del player ma scalate)
+    ctx.fillStyle = '#ffdbac';
+    ctx.fillRect(npc.x + 4, npc.y + 2, w - 8, 18);
+
+    // 4. OCCHI (Quadrati neri, proprio come il tuo personaggio)
+    ctx.fillStyle = '#333';
+    // Posizionati leggermente più larghi per la testa più grande
+    ctx.fillRect(npc.x + 8, npc.y + 8, 4, 4);  // Occhio SX
+    ctx.fillRect(npc.x + 20, npc.y + 8, 4, 4); // Occhio DX
+
+    // 5. TRATTI DISTINTIVI (Capelli e Barba pixelati)
+    if (npc.id_name === 'eraclito') {
+        // ERACLITO: Capelli e barba "disordinati" (blocchi sparsi)
+        ctx.fillStyle = '#2d1b0e';
+        ctx.fillRect(npc.x + 2, npc.y, w - 4, 6); // Capelli sopra
+        ctx.fillRect(npc.x + 2, npc.y + 6, 4, 12); // Ciocca laterale
+        ctx.fillRect(npc.x + w - 6, npc.y + 6, 4, 12); // Ciocca laterale
+        ctx.fillRect(npc.x + 8, npc.y + 18, 16, 8); // Barba incolta
+    } else {
+        // PARMENIDE: Capelli e barba "ordinati" e Bianchi
+        ctx.fillStyle = '#ecf0f1';
+        ctx.fillRect(npc.x + 4, npc.y, w - 8, 4); // Corona di capelli
+        ctx.fillRect(npc.x + 6, npc.y + 18, 20, 15); // Barba lunga e quadrata
+        // Baffo pixel
+        ctx.fillStyle = '#bdc3c7';
+        ctx.fillRect(npc.x + 10, npc.y + 16, 12, 2);
+    }
+    ctx.restore();
+}
+
+
+function drawHeraclitusGame() {
+    const laneWidth = 1200 / heraclitusGame.lanes;
+
+    // 💀 GAME OVER BLOCCANTE (DEVE ESSERE PRIMO)
+    if (heraclitusGame.gameOver) {
+        ctx.fillStyle = 'rgba(0,0,0,0.85)';
+        ctx.fillRect(0, 0, 1200, 640);
+        ctx.fillStyle = '#e74c3c';
+        ctx.font = 'bold 64px Georgia';
+        ctx.textAlign = 'center';
+        ctx.fillText('IL LOGOS TI HA RESPINTO', 600, 260);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '28px Georgia';
+        ctx.fillText('Premi SPACE per riprovare', 600, 340);
+        return; // ⛔ STOP QUI
+    }
+    // 🌊 SFONDO FIUME (pulito e coerente)
+    let t = heraclitusGame.scrollY;
+    let grad = ctx.createLinearGradient(0, 0, 0, 640);
+    grad.addColorStop(0, '#0b2a3a');
+    grad.addColorStop(0.5, '#0e3d52');
+    grad.addColorStop(1, '#07202c');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 1200, 640);
+    // 🌊 MOVIMENTO ACQUA (pixel wave semplice)
+    for (let y = 0; y < 640; y += 20) {
+        let wave = Math.sin((y * 0.05) + t * 0.08) * 6;
+        ctx.fillStyle = 'rgba(120, 180, 200, 0.25)';
+        ctx.fillRect(
+            wave,
+            y + (t % 20),
+            1200,
+            18
+        );
+    }
+// TEMPIO FISSO (NON SI MUOVE MAI)
+const templeX = 0;
+const templeY = 0;
+ctx.save();
+ctx.globalAlpha = 1;
+ctx.fillStyle = '#dcdde1';
+ctx.fillRect(templeX, templeY, 1200, 140);
+
+// pattern marmo
+for (let i = 0; i < 1200; i += 60) {
+    for (let j = 0; j < 140; j += 60) {
+       ctx.fillStyle =
+            ((i + j) / 60 % 2 === 0)
+            ? '#f5f6fa'
+            : '#dcdde1';
+        ctx.fillRect(i, j, 60, 60);
+    }
+}
+
+    // 🧠 PAROLA GUIDA (in alto)
+    ctx.fillStyle = '#f1c40f';
+    ctx.font = 'bold 44px Georgia';
+    ctx.textAlign = 'center';
+
+   ctx.save();
+ctx.globalAlpha = 1;
+ctx.globalCompositeOperation = 'source-over';
+ctx.textAlign = 'center';
+ctx.textBaseline = 'middle';
+if (heraclitusGame.active && !heraclitusGame.won && !heraclitusGame.gameOver) {
+    ctx.fillStyle = '#f1c40f';
+    ctx.font = 'bold 44px Georgia';
+    ctx.fillText(heraclitusGame.guideWord, 600, 80);
+}
+ctx.restore();
+ctx.restore();
+    // 🏁 CORSIE + OPZIONI
+if (heraclitusGame.active && !heraclitusGame.finalZone) {
+    for (let i = 0; i < heraclitusGame.lanes; i++) {
+        let x = i * laneWidth;
+        ctx.save();
+ctx.globalAlpha = 1;
+        // corsia
+        ctx.fillStyle =
+            i === heraclitusGame.currentLane
+            ? 'rgba(255,255,255,0.15)'
+            : 'rgba(255,255,255,0.05)';
+        ctx.fillRect(x, 0, laneWidth, 640);
+ctx.restore();
+        // box opzione
+        ctx.fillStyle = '#e67e22';
+        ctx.fillRect(
+            x + laneWidth/2 - 110,
+            130,
+            220,
+            70
+        );
+        // testo opzione
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 22px Georgia';
+        ctx.textAlign = 'center';
+        ctx.fillText(
+            heraclitusGame.options[i],
+            x + laneWidth / 2,
+            175
+        );
+if (heraclitusGame.logostextShown) {
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, 1200, 640);
+    ctx.fillStyle = '#f1c40f';
+    ctx.font = 'bold 52px Georgia';
+    ctx.textAlign = 'center';
+    ctx.fillText("HAI SUPERATO IL LOGOS", 600, 300);
+}
+    }
+}
+  let baseLane = heraclitusGame.currentLane ?? 0;
+// posizione corsia
+let playerX =
+    heraclitusGame.currentLane * laneWidth + laneWidth / 2;
+// posizione verticale progressiva
+let startY = 520;
+// corretto = sale
+// errore = scende
+let playerY =
+    startY + (heraclitusGame.progressPos * 80);
+if (heraclitusGame.active && !heraclitusGame.postWin) {
+    // acqua sotto
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.fillRect(playerX - 60, playerY + 40, 120, 6);
+    // barca
+    ctx.fillStyle = '#6b4f2a';
+    ctx.beginPath();
+    ctx.ellipse(playerX, playerY + 35, 60, 18, 0, 0, Math.PI * 2);
+    ctx.fill();
+}
+if (!heraclitusGame.freeRoam) {
+    drawPlayer(playerX - 12, playerY);
+} else {
+
+    drawPlayer(player.x, player.y);
+}
+if (heraclitusGame.freeRoam || heraclitusGame.won) {
+    drawPhilosopher(heraclitusGame.npc);
+}
+
+    // ⏱ TIMER
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    if (heraclitusGame.active) {
+    ctx.fillRect(300, 20, 600, 20);
+    ctx.fillStyle = '#f1c40f';
+    ctx.fillRect(
+        300,
+        20,
+        600 * (heraclitusGame.timer / heraclitusGame.maxTimer),
+        20
+    );
+    ctx.fillStyle = '#fff';
+    ctx.font = '16px Georgia';
+    ctx.textAlign = 'center';
+    ctx.fillText(
+        Math.ceil(heraclitusGame.timer / 60),
+        600,
+        15
+    );
+}
+    // 🔴🟢 FEEDBACK
+    if (heraclitusGame.flashTimer > 0) {
+        ctx.fillStyle =
+            heraclitusGame.flash === 'red'
+            ? 'rgba(255,0,0,0.3)'
+            : 'rgba(0,255,0,0.3)';
+        ctx.fillRect(0, 0, 1200, 640);
+       
+        let laneWidth = 1200 / heraclitusGame.lanes;
+// X resta solo per corsia
+let baseX =
+    heraclitusGame.currentLane * laneWidth + laneWidth / 2;
+// Y = PROGRESSIONE VERTICALE
+let baseY = 520; // punto di partenza
+let playerY = baseY + (heraclitusGame.progressPos * -80);
+    }
+if (heraclitusGame.finalZone && heraclitusGame.logoMessageTimer > 0) {
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, 1200, 640);
+ ctx.fillStyle = '#f1c40f';
+    ctx.font = 'bold 52px Georgia';
+    ctx.textAlign = 'center';
+    ctx.fillText("HAI SUPERATO IL LOGOS", 600, 300);
+    heraclitusGame.logoMessageTimer--;
+
+     ctx.fillStyle = '#ffffff';
+        ctx.font = '24px Georgia';
+        ctx.fillText("Premi E per uscire", 600, 380);
+}
+}
+
+function checkGoldenKeyUnlock(ultimoCompletato) {
+    if (typeof goldenKey === 'undefined') return;
+
+    // ==================================================================
+    // 🏆 CASO FINALE: ENTRAMBI COMPLETATI (Scatta quando finisci il SECONDO)
+    // ==================================================================
+    if (philosophersCompleted.eraclito && philosophersCompleted.parmenide) {
+        if (!goldenKey.collected && !goldenKey.active) {
+            // Fai apparire la chiave al centro della stanza
+            goldenKey.active = true;
+            goldenKey.x = 600;
+            goldenKey.y = 450;
+            goldenKey.followPlayer = false;
+            gameState = "world"; // Forza il ritorno alla mappa
+
+            // Sceglie il testo in base a chi hai fatto per ULTIMO delle due opzioni
+            if (ultimoCompletato === "parmenide") {
+                // OPZIONE 1: Eraclito fatto per primo, Parmenide fatto per secondo
+                dialogue = [
+                    "PARMENIDE: Complimenti, hai superato anche la mia prova!",
+                    "I frammenti dell'Essere e del Divenire si fondono in un'unica armonia...",
+                    "HAI SBLOCCATO LA CHIAVE D'ORO!",
+                    "Raccoglila e portala alla grande porta a Nord per aprirla e andare avanti!"
+                ];
+            } else if (ultimoCompletato === "eraclito") {
+                // OPZIONE 2: Parmenide fatto per primo, Eraclito fatto per secondo
+                dialogue = [
+                    "ERACLITO: Complimenti, hai superato anche la mia prova!",
+                    "Il flusso e l'immutabilità trovano finalmente un punto d'incontro...",
+                    "HAI SBLOCCATO LA VERA CHIAVE D'ORO!",
+                    "Raccoglila e portala alla grande porta a Nord per aprirla e andare avanti!"
+                ];
+            }
+        }
+        return; // Esci subito
+    }
+
+    // ==================================================================
+    // ⏳ CASO PARZIALE: HAI FATTO SOLO IL PRIMO FILOSOFO
+    // ==================================================================
+    // Se hai fatto SOLO Eraclito (e Parmenide è ancora da fare)
+    if (philosophersCompleted.eraclito && !philosophersCompleted.parmenide) {
+        if (!heraclitusGame.logostextShown) {
+            dialogue = [
+                "ERACLITO: Complimenti, hai capito la mia teoria del Logos!",
+                "Per sbloccare la chiave, ora vai a fare il mini gioco di Parmenide."
+            ];
+            heraclitusGame.logostextShown = true;
+        }
+    }
+
+    // Se hai fatto SOLO Parmenide (e Eraclito è ancora da fare)
+    if (philosophersCompleted.parmenide && !philosophersCompleted.eraclito) {
+        if (!parmenideGame.logostextShown) {
+            dialogue = [
+                "PARMENIDE: Complimenti, hai capito la mia visione sull'Essere!",
+                "Per sbloccare la chiave, ora devi svolgere il minigioco di Eraclito."
+            ];
+            parmenideGame.logostextShown = true;
+        }
+    }
+}
+
+function draw() {
+    ctx.clearRect(0, 0, 1200, 640);
+    
+    // ========================================================
+    // 🌌 ROOM 0 - ESTERNO (NOTTE)
+    // ========================================================
+    if (room === 0) {
+        ctx.fillStyle = '#050508';
+        ctx.fillRect(0, 0, 1200, 640);
+        
+        const map = maps[0];
+        for (let y = 0; y < H; y++) {
+            for (let x = 0; x < W; x++) {
+                if (map[y][x] === 3) {
+                    drawPath(x * TS, y * TS, TS, TS);
+                } else {
+                    ctx.fillStyle = (map[y][x] === 1 ? '#2a2418' : '#0a1a0b');
+                    ctx.fillRect(x * TS, y * TS, TS, TS);
+                }
+            }
+        }
+
+        for (const t of trees.sort((a, b) => a.y - b.y)) {
+            const px = t.x * TS, py = t.y * TS, s = 18 * t.h;
+            ctx.fillStyle = '#3e2723'; ctx.fillRect(px + s / 2 - 3, py + 10, 8, 20 * t.h);
+            ctx.fillStyle = ['#112d19', '#1a3d24', '#1d4226'][t.color];
+            ctx.beginPath(); ctx.arc(px + s / 2, py + 8, s, 0, Math.PI * 2); ctx.fill();
+        }
+
+        drawTemple();
+        drawPlayer(player.x, player.y);
+        ctx.fillStyle = 'rgba(0, 0, 20, 0.4)';
+        ctx.fillRect(0, 0, 1200, 640);
+        
+        // Schermata Introduttiva Centrale
+        if (gameState === "intro") {
+            ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+            ctx.fillRect(0, 0, 1200, 640);
+
+            const boxW = 500;
+            const boxH = 350;
+            const boxX = (1200 - boxW) / 2;
+            const boxY = (640 - boxH) / 2;
+
+            ctx.fillStyle = "#161922"; 
+            ctx.fillRect(boxX, boxY, boxW, boxH);
+            ctx.strokeStyle = "#c9b27a"; 
+            ctx.lineWidth = 4;
+            ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+
+            ctx.fillStyle = "#c9b27a";
+            ctx.font = "bold 28px Georgia";
+            ctx.fillText("TEMPIO DELLA CONOSCENZA", 1200 / 2, boxY + 50);
+
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "italic 16px Georgia";
+            ctx.fillText("Alla ricerca della Verità", 1200 / 2, boxY + 90);
+
+            ctx.strokeStyle = "rgba(201, 178, 122, 0.3)";
+            ctx.beginPath();
+            ctx.moveTo(boxX + 50, boxY + 120);
+            ctx.lineTo(boxX + boxW - 50, boxY + 120);
+            ctx.stroke();
+
+            ctx.fillStyle = "#e0e0e0";
+            ctx.font = "16px Georgia";
+            ctx.fillText("• [W, A, S, D] o [Frecce] : Muoviti nel tempio", 1200 / 2, boxY + 160);
+            ctx.fillText("• [E] : Interagisci con oggetti e filosofi", 1200 / 2, boxY + 200);
+            ctx.fillText("• [R] : Rifletti quando la mente percepisce qualcosa", 1200 / 2, boxY + 240);
+
+            ctx.fillStyle = "#c9b27a";
+            ctx.font = "bold 14px Georgia";
+            ctx.fillText("Premi [E] per iniziare il viaggio...", 1200 / 2, boxY + 300);
+            
+            ctx.textAlign = "left";
+            ctx.textBaseline = "alphabetic";
+        }
+    }
+    // ========================================================
+    // 🏛️ ROOM 1 - INTERNO TEMPIO (ARCHÈ)
+    // ========================================================
+    else if (room === 1) {
+        for (let i = 0; i < 1200; i += 60) {
+            for (let j = 0; j < 640; j += 60) {
+                ctx.fillStyle = ((i + j) / 60 % 2 === 0) ? '#f5f6fa' : '#dcdde1';
+                ctx.fillRect(i, j, 60, 60);
+                ctx.strokeStyle = 'rgba(0,0,0,0.05)';
+                ctx.strokeRect(i, j, 60, 60);
+            }
+        }
+        drawExitDoor();
+
+        let objects = [];
+        room1Props.slice(0, 3).forEach(p => objects.push({ y: p.y + p.h, draw: () => drawNobleStatue(p) }));
+        if (typeof pillars !== 'undefined') {
+            pillars.forEach(p => objects.push({ y: p[1] + 130, draw: () => drawClassicColumn(p[0], p[1]) }));
+        }
+        objects.push({ y: player.y + player.h, draw: () => drawPlayer(player.x, player.y) });
+        
+        if (puzzle.hasKey) {
+            objects.push({ y: player.y + 10, draw: () => drawKeyShape(player.x + 35, player.y + 10, -Math.PI / 4) });
+        }
+        
+        objects.sort((a, b) => a.y - b.y).forEach(obj => obj.draw());
+
+        const alt = room1Props[3]; 
+        ctx.fillStyle = '#5d4037'; ctx.fillRect(alt.x, alt.y + 20, alt.w, alt.h - 20);
+        ctx.fillStyle = '#8d6e63'; ctx.fillRect(alt.x - 10, alt.y, alt.w + 20, 20);
+        
+        if (puzzle.keyAppeared && !puzzle.hasKey && !puzzle.doorOpen) {
+            drawKeyShape(alt.x + 60, alt.y + 5, 0);
+        }
+        
+        drawAtmosphericLighting();
+
+        if (gameState === "room1_intro") {
+            const canvasW = ctx.canvas.width;
+            const canvasH = ctx.canvas.height;
+            ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
+            ctx.fillRect(0, 0, canvasW, canvasH);
+
+            const boxW = 750;
+            const boxH = 420;
+            const boxX = (canvasW - boxW) / 2;
+            const boxY = (canvasH - boxH) / 2;
+
+            ctx.fillStyle = "#1a1a1a";
+            ctx.fillRect(boxX, boxY, boxW, boxH);
+            ctx.strokeStyle = "#4e342e";
+            ctx.lineWidth = 6;
+            ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+            ctx.textAlign = "center";
+            ctx.fillStyle = "#d4af37";
+            ctx.font = "bold 26px Georgia";
+            ctx.fillText("LA STANZA DEI FILOSOFI DELLA PHYSIS - L'ARCHÈ", canvasW / 2, boxY + 50);
+
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "18px Arial";
+            let lines = [
+                "Sei entrato nel cuore del pensiero arcaico (VI secolo a.C.).",
+                "In questa stanza i primi filosofi della natura cercano l'Archè:",
+                "il principio unico e originario da cui tutto si genera.",
+                "",
+                "COSA FARE:",
+                "1. Avvicinati alle tre statue e premi [ E ] per ascoltare gli indizi.",
+                "2. Digita sulla tastiera il nome del filosofo corretto e premi [ ENTER ].",
+                "3. Rispondi al loro quesito premendo i tasti numerici [ 1 ], [ 2 ] o [ 3 ].",
+                "4. Una volta illuminati tutti e tre, raccogli la chiave dall'altare."
+            ];
+            
+            for (let i = 0; i < lines.length; i++) {
+                ctx.fillText(lines[i], canvasW / 2, boxY + 110 + (i * 24));
+            }
+
+            ctx.fillStyle = "#ff6600";
+            ctx.font = "bold 16px Arial";
+            ctx.fillText("PREMI IL TASTO [ E ] PER INIZIARE LA RICERCA", canvasW / 2, boxY + boxH - 30);
+        }
+    } 
+    // ========================================================
+    // 🏛️ ROOM 2 - IL DIVENIRE E L'ESSERE (ERACLITO E PARMENIDE)
+    // ========================================================
+    else if (room === 2) {
+        if (gameState === "heraclitus") {
+            drawHeraclitusGame();
+            return; // Interrompe temporaneamente solo se si è dentro il minigioco a schermo intero
+        }
+
+        for (let i = 0; i < 1200; i += 60) {
+            for (let j = 0; j < 640; j += 60) {
+                ctx.fillStyle = ((i + j) / 60 % 2 === 0) ? '#f5f6fa' : '#dcdde1';
+                ctx.fillRect(i, j, 60, 60);
+                ctx.strokeStyle = 'rgba(0,0,0,0.05)';
+                ctx.strokeRect(i, j, 60, 60);
+            }
+        }
+        
+        drawDoor(2);
+
+        let objects = [];
+        if (typeof room2Pillars !== 'undefined') {
+            room2Pillars.forEach(p => objects.push({ y: p.y + 130, draw: () => drawClassicColumn(p.x, p.y) }));
+        }
+        if (typeof room2NPCs !== 'undefined') {
+            // Carica i Filosofi (NPC) se visibili
+room2NPCs.forEach(n => {
+    // Rimosso il blocco che nascondeva Eraclito in freeRoam!
+    objects.push({ 
+        y: n.y + n.h, 
+        draw: () => drawPhilosopher(n) 
+    });
+});
+        }
+        objects.push({ y: player.y + player.h, draw: () => drawPlayer(player.x, player.y) });
+
+        if (goldenKey.active && goldenKey.collected) {
+            objects.push({ y: player.y + 10, draw: () => drawKeyShape(player.x + 35, player.y + 10, -Math.PI / 4) });
+        }
+
+        objects.sort((a, b) => a.y - b.y).forEach(obj => obj.draw());
+        
+        if (goldenKey.active && !goldenKey.collected && !heraclitusGame.finalZone) {
+            ctx.save();
+            ctx.fillStyle = "gold";
+            drawKeyShape(goldenKey.x, goldenKey.y, 0);
+            ctx.restore();
+        }
+
+        drawAtmosphericLighting();
+
+        if (typeof roomIntro !== 'undefined' && roomIntro.active && roomIntro.currentRoom === 2) {
+            drawRoomIntroduction(
+                "IL DIVENIRE E L'ESSERE",
+                "Superato il problema della materia originaria (Archè), il pensiero greco si spacca in due tesi monumentali e opposte sulla natura della realtà.",
+                "A sinistra, Eraclito di Efeso afferma il DIVENIRE: tutto muta costantemente come un fiume in piena guidato dal Logos e dalla lotta dei contrari. A destra, Parmenide di Elea teorizza l'ESSERE: eterno, immutabile e perfetto, dichiarando il cambiamento una mera illusione dei sensi.",
+                "Sfida i due maestri del pensiero per unire le due facce della Verità e ottenere la Vera Chiave d'Oro."
+            );
+        }
+        // Aggiungi questo nel tuo draw() o render() dove ci sono gli altri controlli di gameState
+// Sostituisci questo blocco nel tuo draw() o render()
+if (gameState === "room2_intro") {
+    const canvasW = ctx.canvas.width;
+    const canvasH = ctx.canvas.height;
+    ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
+    ctx.fillRect(0, 0, canvasW, canvasH);
+
+    const boxW = 750;
+    const boxH = 420;
+    const boxX = (canvasW - boxW) / 2;
+    const boxY = (canvasH - boxH) / 2;
+
+    ctx.fillStyle = "#1a1a1a";
+    ctx.fillRect(boxX, boxY, boxW, boxH);
+    ctx.strokeStyle = "#4e342e";
+    ctx.lineWidth = 6;
+    ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#d4af37";
+    ctx.font = "bold 26px Georgia";
+    ctx.fillText("LA STANZA DELL'ESSERE E DEL DIVENIRE", canvasW / 2, boxY + 50);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "18px Arial";
+    let lines = [
+        "In questa stanza si scontrano due visioni opposte della realtà:",
+        "il continuo mutamento e l'immutabilità assoluta.",
+        "",
+        "COSA FARE:",
+        "1. Vai a sinistra da Eraclito e supera la sfida del conflitto dei contrari.",
+        "2. Vai a destra da Parmenide ed entra nella Via della Verità dell'Essere.",
+        "3. Una volta comprese entrambe le visioni, sbloccherai la Chiave d'Oro."
+    ];
+    
+    for (let i = 0; i < lines.length; i++) {
+        ctx.fillText(lines[i], canvasW / 2, boxY + 110 + (i * 24));
+    }
+
+    ctx.fillStyle = "#ff6600";
+    ctx.font = "bold 16px Arial";
+    ctx.fillText("PREMI IL TASTO [ E ] PER ENTRARE NELLA STANZA", canvasW / 2, boxY + boxH - 30);
+}
+    }
+    // ========================================================
+    // 🏛️ ROOM 3 - TRIBUNALE (SOCRATE)
+    // ========================================================
+    else if (room === 3) {
+        drawCourtroomScene();
+        drawDoor(3); 
+
+        if (typeof roomKey !== 'undefined' && roomKey.collected) {
+            drawKeyShape(player.x + 35, player.y + 10, -Math.PI / 4);
+        } 
+        else if (typeof roomKey !== 'undefined' && roomKey.visible) {
+            ctx.save();
+            drawKeyShape(roomKey.x, roomKey.y, 0);
+            ctx.restore();
+        }
+        drawPlayer(player.x, player.y);
+
+        if (gameState === "room3_intro") {
+            const canvasW = ctx.canvas.width;
+            const canvasH = ctx.canvas.height;
+            ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
+            ctx.fillRect(0, 0, canvasW, canvasH);
+
+            const boxW = 750;
+            const boxH = 420;
+            const boxX = (canvasW - boxW) / 2;
+            const boxY = (canvasH - boxH) / 2;
+
+            ctx.fillStyle = "#1a1a1a";
+            ctx.fillRect(boxX, boxY, boxW, boxH);
+            ctx.strokeStyle = "#4e342e";
+            ctx.lineWidth = 6;
+            ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+            ctx.textAlign = "center";
+            ctx.fillStyle = "#d4af37";
+            ctx.font = "bold 26px Georgia";
+            ctx.fillText("IL PROCESSO DI SOCRATE", canvasW / 2, boxY + 50);
+
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "18px Arial";
+            let lines = [
+                "Sei giunto al cospetto del più saggio tra gli uomini.",
+                "Socrate non ha lasciato scritti: il suo sapere risiede nel dialogo.",
+                "Egli sa di non sapere, e combatte la falsa conoscenza con l'ironia.",
+                "",
+                "COSA FARE:",
+                "1. Avvicinati a Socrate e premi il tasto [ E ].",
+                "2. Rispondi alle domande per aiutare Socrate a vincere il processo.",
+                "3. Dimostra di aver compreso la Maieutica per superare l'esame finale.",
+                "4. Raccogli la chiave d'oro e procedi nella prossima stanza."
+            ];
+            
+            for (let i = 0; i < lines.length; i++) {
+                ctx.fillText(lines[i], canvasW / 2, boxY + 110 + (i * 24));
+            }
+
+            ctx.fillStyle = "#ff6600";
+            ctx.font = "bold 16px Arial";
+            ctx.fillText("PREMI IL TASTO [ E ] PER INIZIARE IL DIALOGO", canvasW / 2, boxY + boxH - 30);
+        }
+    }
+    
+    // ========================================================
+    // 🏛️ ROOM 4 - IDEALISMO (PLATONE)
+    // ========================================================
+    else if (room === 4) {
+        ctx.fillStyle = "#1a1a28";
+        ctx.fillRect(0, 0, 1200, 640);
+
+        for (let i = 0; i < 1200; i += 60) {
+            for (let j = 0; j < 640; j += 60) {
+                ctx.fillStyle = ((i + j) / 60 % 2 === 0) ? '#f5f6fa' : '#dcdde1';
+                ctx.fillRect(i, j, 60, 60);
+                ctx.strokeStyle = 'rgba(0,0,0,0.05)';
+                ctx.strokeRect(i, j, 60, 60);
+            }
+        }
+
+        drawPlatoRoom();
+
+        if (gameState !== "platoGame" && gameState !== "platoWin") {
+            drawPlayer(player.x, player.y);
+        }
+
+        drawAtmosphericLighting();
+        if (gameState === "room4_intro") {
+            const canvasW = ctx.canvas.width;
+            const canvasH = ctx.canvas.height;
+            ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
+            ctx.fillRect(0, 0, canvasW, canvasH);
+
+            const boxW = 750;
+            const boxH = 420;
+            const boxX = (canvasW - boxW) / 2;
+            const boxY = (canvasH - boxH) / 2;
+
+            ctx.fillStyle = "#1a1a1a";
+            ctx.fillRect(boxX, boxY, boxW, boxH);
+            ctx.strokeStyle = "#4e342e";
+            ctx.lineWidth = 6;
+            ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+            ctx.textAlign = "center";
+            ctx.fillStyle = "#d4af37";
+            ctx.font = "bold 26px Georgia";
+            ctx.fillText("LA VISIONE DUALISTICA DI PLATONE", canvasW / 2, boxY + 50);
+
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "18px Arial";
+            let lines = [
+                "Sei asceso al culmine della filosofia classica.",
+                "Davanti a te si trova Platone e l'enigma del mondo delle Idee.",
+                "Le ombre sul fondo della caverna distorcono la tua percezione.",
+                "",
+                "COSA FARE:",
+                "1. Supera le illusioni sensibili del mondo materiale.",
+                "2. Interagisci con Platone premendo [ E ].",
+                "3. Mostra a Platone di aver capito la sua filosofia.",
+                "4. Avvicinati alla chiave, premi [E] per raccoglierla."
+            ];
+            
+            for (let i = 0; i < lines.length; i++) {
+                ctx.fillText(lines[i], canvasW / 2, boxY + 110 + (i * 24));
+            }
+
+            ctx.fillStyle = "#ff6600";
+            ctx.font = "bold 16px Arial";
+            ctx.fillText("PREMI IL TASTO [ E ] PER LIBERARTI DALLE CATENE", canvasW / 2, boxY + boxH - 30);
+        }
+        // ========================================================
+        // 🏆 SCHERMATA DI VITTORIA FINALE (STILE COORDINATO)
+        // ========================================================
+        if (gameState === "victory") {
+            const canvasW = ctx.canvas.width;
+            const canvasH = ctx.canvas.height;
+            ctx.fillStyle = "rgba(0, 0, 0, 0.9)"; // Sfondo un pizzico più scuro per il finale
+            ctx.fillRect(0, 0, canvasW, canvasH);
+
+            const boxW = 750;
+            const boxH = 420;
+            const boxX = (canvasW - boxW) / 2;
+            const boxY = (canvasH - boxH) / 2;
+
+            ctx.fillStyle = "#1a1a1a";
+            ctx.fillRect(boxX, boxY, boxW, boxH);
+            ctx.strokeStyle = "#4e342e";
+            ctx.lineWidth = 6;
+            ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+            ctx.textAlign = "center";
+            ctx.fillStyle = "#d4af37"; // Oro antico
+            ctx.font = "bold 28px Georgia";
+            ctx.fillText("CONGRATULAZIONI: SEI DIVENTATO FILOSOFO!", canvasW / 2, boxY + 50);
+
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "18px Arial";
+            let lines = [
+                "Hai completato con successo il cammino della Conoscenza.",
+                "Hai cercato l'Archè nella natura, affrontato il Logos di Eraclito e l'Essere di Parmenide,",
+                "sostenuto Socrate e visto la luce fuori dalla Caverna.",
+                "",
+                "La tua anima si è liberata dalle catene dell'opinione (Doxa)",
+                "per ascendere alla contemplazione della verità (Episteme).",
+                "",
+                "Il Tempio dei Filosofi ora custodisce il tuo nome tra i sapienti."
+            ];
+            
+            for (let i = 0; i < lines.length; i++) {
+                ctx.fillText(lines[i], canvasW / 2, boxY + 110 + (i * 24));
+            }
+
+            ctx.fillStyle = "#ff6600"; // Arancione di azione
+            ctx.font = "bold 16px Arial";
+            ctx.fillText("GRAZIE PER AVER GIOCATO!", canvasW / 2, boxY + boxH - 30);
+        }
+    }
+    
+        // ========================================================
+    // 🏛️ ROOM 3 - IL MITO DELLA CAVERNA (IL CULMINE DEL VIAGGIO)
+    // ========================================================
+    else if (room === 3) {
+        // Disegno del pavimento (Stile scacchi coordinato)
+        for (let i = 0; i < 1200; i += 60) {
+            for (let j = 0; j < 640; j += 60) {
+                ctx.fillStyle = ((i + j) / 60 % 2 === 0) ? '#f5f6fa' : '#dcdde1';
+                ctx.fillRect(i, j, 60, 60);
+                ctx.strokeStyle = 'rgba(0,0,0,0.05)';
+                ctx.strokeRect(i, j, 60, 60);
+            }
+        }
+
+        // Disegna il giocatore e gli elementi della Stanza 3
+        let objects = [];
+        objects.push({ y: player.y + player.h, draw: () => drawPlayer(player.x, player.y) });
+        
+        // Se ci sono pilastri o NPC specifici della Stanza 3 (es. Platone), verranno inseriti qui dentro
+        if (typeof room3Props !== 'undefined') {
+            room3Props.forEach(p => objects.push({ y: p.y + p.h, draw: () => drawNobleStatue(p) }));
+        }
+
+        objects.sort((a, b) => a.y - b.y).forEach(obj => obj.draw());
+
+        // Gestione delle luci atmosferiche (adattate per la stanza 3 se necessario)
+        drawAtmosphericLighting();
+
+        // ========================================================
+        // 📜 INTERFACCIA INTRODUTTIVA STANZA 3 (STILE COORDINATO)
+        // ========================================================
+        if (gameState === "room4_intro") {
+            const canvasW = ctx.canvas.width;
+            const canvasH = ctx.canvas.height;
+            ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
+            ctx.fillRect(0, 0, canvasW, canvasH);
+
+            const boxW = 750;
+            const boxH = 420;
+            const boxX = (canvasW - boxW) / 2;
+            const boxY = (canvasH - boxH) / 2;
+
+            ctx.fillStyle = "#1a1a1a";
+            ctx.fillRect(boxX, boxY, boxW, boxH);
+            ctx.strokeStyle = "#4e342e";
+            ctx.lineWidth = 6;
+            ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+            ctx.textAlign = "center";
+            ctx.fillStyle = "#d4af37";
+            ctx.font = "bold 26px Georgia";
+            ctx.fillText("STANZA 3: L'IPERURANIO E LA CAVERNA DI PLATONE", canvasW / 2, boxY + 50);
+
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "18px Arial";
+            let lines = [
+                "Sei asceso al culmine della filosofia classica.",
+                "Davanti a te si trova Platone e l'enigma del mondo delle Idee.",
+                "Le ombre sul fondo della caverna distorcono la verità.",
+                "",
+                "COSA FARE:",
+                "1. Supera le illusioni sensibili del mondo materiale.",
+                "2. Interagisci con Platone premendo il tasto [ E ].",
+                "3. Risolvi il quesito finale sul Mito della Caverna.",
+                "4. Spezza le catene dell'ignoranza per completare la tua Episteme."
+            ];
+            
+            for (let i = 0; i < lines.length; i++) {
+                ctx.fillText(lines[i], canvasW / 2, boxY + 110 + (i * 24));
+            }
+
+            ctx.fillStyle = "#ff6600";
+            ctx.font = "bold 16px Arial";
+            ctx.fillText("PREMI IL TASTO [ E ] PER LIBERARTI DALLE CATENE", canvasW / 2, boxY + boxH - 30);
+        }
+    }
+    // ========================================================
+    // 🌌 ROOM 5 - USCITA
+    // ========================================================
+    else if (room === 5) {
+        ctx.fillStyle = "#050508";
+        ctx.fillRect(0, 0, 1200, 640);
+
+        ctx.fillStyle = "#f1c40f";
+        ctx.font = "bold 42px Georgia";
+        ctx.textAlign = "center";
+        ctx.fillText("USCITA DAL TEMPIO", 600, 260);
+
+        ctx.font = "22px Arial";
+        ctx.fillStyle = "#ecf0f1";
+        ctx.fillText("La stanza finale verrà costruita qui.", 600, 330);
+
+        drawPlayer(player.x, player.y);
+    }
+
+    // ========================================================
+    // 🖥️ LOGICA COERENTE DELLE INTERFACCE, DIALOGHI E PROMPT
+    // ========================================================
+    
+    // Controlliamo che NON ci sia un dialogo a schermo intero attivo per stampare i tasti rapidi
+    if (!dialogue && !isTyping) {
+        ctx.save();
+        ctx.textAlign = 'center';
+        
+        // 1. Prompt di riflessione [R]
+        if (typeof canReflect !== 'undefined' && canReflect && !reflectionDone) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 18px Arial';
+            ctx.fillText("[R] Rifletti", player.x + 15, player.y - 25);
+        }
+        
+        // 2. Scritta per Socrate (Stanza 3)
+        if (room === 3 && typeof canStartDialog !== 'undefined' && canStartDialog && !keySpawned) {
+            ctx.fillStyle = "#f1c40f"; 
+            ctx.font = "bold 16px Georgia";
+            ctx.fillText("[E] Aiuta Socrate", player.x + 20, player.y - 20); 
+        } 
+        // 3. Prompt di interazione generico negli altri casi se c'è un oggetto vicino
+        else if (nearbyInteractable) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 16px Arial';
+            ctx.fillText("[E] Interagisci", player.x + 15, player.y - 20);
+        }
+        ctx.restore();
+        
+        // Gestione scritte di eventi globali lampo
+        if (typeof globalEventTimer !== 'undefined' && globalEventTimer > 0) {
+            ctx.fillStyle = 'rgba(0,0,0,0.7)';
+            ctx.fillRect(0, 0, 1200, 640);
+            ctx.fillStyle = '#f1c40f';
+            ctx.font = 'bold 42px Georgia';
+            ctx.textAlign = 'center';
+            ctx.fillText(globalEventMessage, 600, 320);
+            globalEventTimer--;
+        }
+    }
+
+    // Disegna la UI dell'albero dei bivi di dialogo se attivo
+    if (gameState === "dialog" && typeof currentNode !== 'undefined' && currentNode) {
+        drawDialogUI();
+    }
+
+    // Schermata interna attiva di Platone
+    if (gameState === "platoGame") {
+        drawPlatoGameScreen();
+        return;
+    }
+    if (room === 4 && typeof finalKeyActive !== 'undefined' && finalKeyActive && !finalKeyTaken) {
+        drawKeyShape(finalKeyX, finalKeyY, 0);
+    }
+
+    // CHIAMATE FINALI ED ESSENZIALI DEI TESTI (Sempre visibili e indipendenti)
+    drawDialogue();
+    drawInputBox();
+}
+
+// =============================
+// 🎮 DIALOG ENGINE (Variabili di supporto)
+// =============================
+// NOTA: 'gameState' NON viene ridefinito qui poiché è già globale.
+
+let dialogStep = 0;
+let juryScore = 50;
+let currentNode = null;
+let canStartDialog = false;
+let processEnded = false; 
+let keySpawned = false; 
+let roomKey = {
+    x: 600,       // Centro esatto del tuo canvas da 1200
+    y: 200,       // Posizionato sul pavimento, sotto la giuria e sopra il pubblico
+    width: 25,
+    height: 25,
+    visible: false,
+    collected: false
+};
+let room3Door = { open: false };
+// =============================
+// ⚖️ DIALOGO (MELETO vs SOCRATE)
+// =============================
+
+let dialogueScene = [
+    // =========================================================================
+    // ATTO 1: L'ACCUSA GENERALE E L'INTERROGAZIONE DI MELETO
+    // =========================================================================
+    {
+        speaker: "meleto",
+        text: "Socrate è colpevole: corrompe i giovani perché non crede negli dèi in cui crede la città, ma in altre divinità nuove!",
+        choices: null
+    },
+    {
+        speaker: "socrate",
+        text: "Cittadini, io dico che il colpevole è Meleto, perché scherza su argomenti seri con leggerezza. Vieni qui Meleto, rispondi:\nche i giovani diventino migliori, non è per te cosa della massima importanza?",
+        choices: null
+    },
+    {
+        speaker: "meleto",
+        text: "Certamente, Socrate. È la cosa più importante in assoluto.",
+        choices: null
+    },
+    {
+        speaker: "socrate",
+        text: "E allora di' ai giudici: chi è l'uomo capace di rendere migliori i giovani? Chi li educa?",
+        choices: [
+            {
+                label: "Le leggi e i giudici che ci ascoltano",
+                effect: +10,
+                response: "Meleto: Le leggi, Socrate! E questi giudici che vedi qui, loro sono capaci di educarli tutti!\n\nSocrate: Per Era, che abbondanza di educatori! E i membri del Consiglio? E l'Assemblea Popolare?\nMeleto: Sì, anche loro, tutti gli Ateniesi li rendono migliori!\nSocrate: Sembra proprio che tutti gli Ateniesi rendano migliori i giovani, a parte me. Io solo li corrompo!\nChe gran disgrazia la mia. Ma dimmi: per i cavalli ti pare sia così? Che tutti li migliorino e uno solo li guasti?\nAl contrario! Uno solo, o pochissimi intenditori sanno migliorarli, mentre la massa se li usa li rovina.\nCosì è per tutti gli animali, Meleto! Hai dimostrato che non ti sei mai dato pensiero dei nostri giovani."
+            },
+            {
+                label: "Solo i veri sapienti sanno educare",
+                effect: +15,
+                response: "Socrate: Tu taci e non sai cosa dire, Meleto! Non ti sembra una vergogna?\nMostra ai giudici chi ha questa capacità, se non sono io. Forse che la massa ha la scienza dell'educazione?\nCome per i cavalli, serve l'esperto per non rovinarli. Ma tu mi trascini qui senza aver mai riflettuto\nsu quale sia il vero bene o chi sia il vero maestro, muovendoti solo per personale risentimento."
+            },
+            {
+                label: "Nessuno in questa corte sa educare",
+                effect: -15,
+                response: "Socrate: Voi cercate il nome di un educatore tra i giudici e i consiglieri, ma mentite a voi stessi.\nLa massa non educa, la massa conforma e corrompe pretendendo che tutti la pensino allo stesso modo.\nSe un solo uomo vi interroga per farvi uscire dall'ignoranza, lo accusate di essere il corruttore.\nState confondendo l'adulazione con l'educazione della gioventù!"
+            }
+        ]
+    },
+    // =========================================================================
+    // ATTO 2: IL PARADOSSO DELLA CORRUZIONE VOLONTARIA
+    // =========================================================================
+    {
+        speaker: "meleto",
+        text: "Tu neghi l'evidenza, Socrate! Tu insegni ai giovani a disprezzare i padri e la polis in modo del tutto volontario!",
+        choices: null
+    },
+    {
+        speaker: "socrate",
+        text: "Rispondimi ancora in nome di Zeus: è meglio vivere tra cittadini onesti o tra malvagi? I cattivi non fanno forse del male a chi sta loro vicino?",
+        choices: [
+            {
+                label: "Nessuno vuole essere danneggiato",
+                effect: +15,
+                response: "Meleto: Certo, i cattivi fanno del male e i buoni del bene. Nessuno vuole essere danneggiato!\n\nSocrate: E tu mi accusi di corrompere i giovani e renderli malvagi volontariamente o involontariamente?\nMeleto: Volontariamente, certo!\nSocrate: Ma come? Tu, così giovane, sei più sapiente di me vecchio? Io sarei così ignorante da non sapere\nche se rendo malvagio un mio compagno, rischio poi che costui mi faccia del male? E lo farei apposta?\nNo, Meleto, non lo farai credere a nessuno! O io non corrompo, o se corrompo lo faccio senza volere.\nE per le colpe involontarie la legge vuole che l'uomo sia istruito in privato, non punito in tribunale!"
+            },
+            {
+                label: "Se lo faccio, merito istruzione, non punizione",
+                effect: +5,
+                response: "Socrate: Se anche ammettessi di aver seminato confusione nei giovani, non l'ho fatto per fare del male alla città.\nSe un uomo sbaglia per ignoranza, il dovere di un cittadino amante della patria è ammonirlo e istruirlo in privato.\nTu invece hai evitato di cercarmi e di parlarmi; hai preferito trascinarmi qui, dove la legge vuole che si portino\ncoloro che hanno bisogno di una punizione, non coloro che hanno solo bisogno di essere istruiti."
+            },
+            {
+                label: "I giovani mi seguono perché siete ignoranti",
+                effect: -20,
+                response: "Socrate: I giovani mi seguono di loro spontanea volontà perché provano gusto a vedere smascherata la vostra finta sapienza.\nSe i loro padri si sentono offesi dalle mie domande, è perché scoprono di non sapere nulla di ciò che professano.\nNon sono io che li traggo in inganno, è la vostra evidente ipocrisia che li allontana da voi."
+            }
+        ]
+    },
+    // =========================================================================
+    // ATTO 3: LA DIFESA DALL'ATEISMO E IL CASO ANASSAGORA
+    // =========================================================================
+    {
+        speaker: "meleto",
+        text: "Giudici! Socrate devia il discorso! L'accusa scritta parla chiaro: egli è un ateo totale, dice che il sole è pietra e la luna è terra!",
+        choices: null
+    },
+    {
+        speaker: "socrate",
+        text: "Meleto, tu sei straordinario! Ma in nome di Zeus, credi davvero che io non ammetta alcuna divinità?",
+        choices: [
+            {
+                label: "Ti stai confondendo con Anassagora",
+                effect: +20,
+                response: "Meleto: Sì, lo giuro davanti a Zeus! Tu non credi a nessuna divinità, sei completamente ateo!\n\nSocrate: Ma caro Meleto, credi forse di accusare Anassagora? Credi che i giudici siano così ignoranti\nda non sapere che i libri di Anassagora di Clazomene sono pieni di queste dottrine sulla pietra e la terra?\nI giovani possono comprare quei libri all'Orchestra per una dramma, a dir molto, e ridere di Socrate\nse pretendesse che queste idee siano sue! Di' la verità: tu hai scritto questa accusa solo per mettermi alla prova,\nperché non sapevi di quale reale colpa accusarmi. Sei caduto in una palese contraddizione!"
+            },
+            {
+                label: "L'accusa si contraddice da sola",
+                effect: +10,
+                response: "Socrate: Tu scrivi nell'accusa che io non credo negli dèi, ma che introduco nuove divinità e demoni.\nÈ come se dicessi: 'Socrate è colpevole perché non crede nella divinità, ma crede nella divinità'.\nQuesto non è un processo serio, cittadini, questo è l'atteggiamento di un giovane sconsiderato\nche ha voluto proporre una sorta di tranello per vedere se il sapiente Socrate se ne sarebbe accorto."
+            },
+            {
+                label: "La natura stessa mostra il divino, non i vostri miti",
+                effect: -15,
+                response: "Socrate: Se per essere pii devo credere che il Sole e la Luna siano bighe guidate da dèi antropomorfi\nche si adirano e combattono come nei versi di Omero, allora sì, preferisco la ragione dei filosofi.\nLa divinità non risiede nei vostri racconti superstiziosi, ma nell'ordine geometrico e razionale del cosmo!"
+            }
+        ]
+    },
+    // =========================================================================
+    // ATTO 4: IL PARADOSSO DEI DEMONI E DEI MULI
+    // =========================================================================
+    {
+        speaker: "meleto",
+        text: "Tu continui a giocare con le parole! Hai ammesso tu stesso di insegnare dottrine che riguardano i demoni!",
+        choices: null
+    },
+    {
+        speaker: "socrate",
+        text: "Esaminiamo questo punto, o giudici. C'è qualcuno tra gli uomini che crede nelle cose dei cavalli, ma non nei cavalli? Rispondi, Meleto: esistono le opere dei demoni senza che esistano i demoni?",
+        choices: [
+            {
+                label: "Se esistono i demoni, esistono gli dèi",
+                effect: +20,
+                response: "Meleto: No, non esiste una cosa simile.\n\nSocrate: Oh, grazie per aver risposto! Dunque tu hai giurato che io credo a ciò che riguarda i demoni.\nMa se credo nelle cose dei demoni, devo necessariamente credere anche nei demoni stessi, non ti pare?\nE i demoni non li consideriamo forse o divinità essi stessi, o figli naturali degli dèi avuti da ninfe?\nCerto! Allora, se i demoni sono di natura divina, come posso io non credere agli dèi?\nSarebbe assurdo come ammettere che esistano i muli (che sono figli di cavalli e asini), ma negare\nche esistano i cavalli e gli asini! Il tuo castello di accuse crolla davanti alla logica più elementare."
+            },
+            {
+                label: "I demoni sono figli degli dèi",
+                effect: +10,
+                response: "Socrate: Tu mi accusi di empietà, ma metti a verbale che io seguo una voce demoniaca.\nChi ammette i figli non può negare i padri. Se i demoni camminano tra noi, il cielo non è vuoto.\nTutta la tua accusa è un paradosso logico inventato per assecondare la calunnia e l'invidia della massa,\nche sarà la mia vera condanna, non tu, Meleto, né Anito."
+            }
+        ]
+    },
+    // =========================================================================
+    // ATTO 5: L'ERANZA E L'ESEMPIO DI ACHILLE
+    // =========================================================================
+    {
+        speaker: "meleto",
+        text: "Socrate, sei un vecchio arrogante! Non ti vergogni di esserti impegnato in una simile attività, correndo ora il rischio concreto di perdere la vita per una condanna a morte?",
+        choices: null
+    },
+   {
+        speaker: "socrate",
+        text: "Meleto, tu credi che un uomo giusto debba calcolare il rischio della morte prima di agire? Sbagli. Quando si compie il proprio dovere, la vita passa in secondo piano. Dimmi, cittadino, a cosa dobbiamo guardare quando il pericolo ci minaccia?",
+        choices: [
+            {
+                label: "All'esempio di Achille: preferire la morte al disonore",
+                effect: +20,
+                response: "Socrate: Pensa ad Achille, il più grande degli eroi greci a Troia. Sua madre, una dea, lo avvisò: 'Se ucciderai Ettore per vendicare i tuoi amici, morirai anche tu'.\nEppure Achille scelse di morire subito piuttosto che vivere da vile e da inutile peso sulla terra.\nSe un eroe ha preferito la tomba al disonore, come posso io abbandonare la filosofia per paura? Chi sceglie una via giusta deve restare al suo posto e affrontare ogni rischio, senza temere la morte pur di salvare il proprio onore!"
+            },
+            {
+                label: "Al dovere verso il Dio che mi ha ordinato di filosofare",
+                effect: +10,
+                response: "Socrate: Quando i generali che voi avete eletto mi ordinarono di combattere a Potidea e a Delio, io restai al mio posto a rischio della vita.\nOra che il Dio Apollo mi ordina di vivere filosofando, esaminando me stesso e gli altri, dovrei scappare per paura della morte?\nSarebbe una vera empietà! Significerebbe avere la presunzione di sapere cosa c'è dopo la morte, temendola come se fosse il peggiore dei mali, quando invece potrebbe essere il più grande dei beni."
+            },
+            {
+                label: "Alla certezza che la morte colpirà me, ma la vergogna colpirà voi",
+                effect: -10,
+                response: "Socrate: Se pensate che uccidendomi metterete a tacere la vostra coscienza, vi illudete. Evitare la morte è facile; ciò che è davvero difficile è evitare la malvagità, che corre molto più veloce della morte.\nIo vengo condannato da voi alla pena capitale, ma voi siete già stati condannati dalla Verità e dalla Giustizia alla pena dell'infamia. Io accetto il mio verdetto, voi portate il peso del vostro."
+            }
+        ]
+    },
+    {
+        speaker: "meleto",
+        text: "Ateniesi, i discorsi sono finiti. La giuria depositi i sassolini nell'urna. Che sia fatta giustizia!",
+        choices: null
+    }
+];
+let audienceCache = [];
+
+function nextDialog() {
+    dialogStep++;
+
+    // Controlliamo se abbiamo superato l'ultimo atto del processo
+    if (dialogStep >= dialogueScene.length) {
+        
+        if (!processEnded) {
+            processEnded = true;
+
+            if (juryScore >= 50) {
+                // ASSOLUZIONE GRAFICA / STORIA ALTERNATIVA (Ma la chiave serve comunque per uscire)
+                currentNode = {
+                    speaker: "giuria",
+                    text: "CONCITTADINI! I voti nell'urna sono stati conteggiati.\nSocrate è ASSOLTO dalle accuse con stretta maggioranza!\n\nSocrate: Ateniesi, accettando questo verdetto, la città ha salvato se stessa dal rimorso. Ma il mio compito non finisce qui. La chiave del destino è sul pavimento: raccoglietela.",
+                    choices: null
+                };
+            } else {
+                // CONDANNA STORICA (Socrate mandato a morte)
+                currentNode = {
+                    speaker: "giuria",
+                    text: "CONCITTADINI! I voti nell'urna sono stati conteggiati.\nSocrate è CONDANNATO alla pena di morte tramite tintura di cicuta.\n\nSocrate: Io me ne vado incontro alla morte, voi alla vita. Chi di noi vada verso il meglio è oscuro a tutti. Raccogliete la chiave, il mio tempo in questa cella è giunto al termine.",
+                    choices: null
+                };
+            }
+            return; // Ferma il codice qui per mostrare il testo a schermo
+        } else {
+            // Il giocatore preme [E] una seconda volta sul verdetto: si chiude il dialogo
+            gameState = "world"; 
+            nearbyInteractable = null; 
+            canStartDialog = false; 
+
+            // La chiave appare sul pavimento in OGNI CASO
+            if (!keySpawned) {
+                roomKey.visible = true;
+                keySpawned = true;
+                console.log("Il processo è concluso. La chiave per la porta finale è apparsa.");
+            }
+            return;
+        }
+    }
+
+    currentNode = dialogueScene[dialogStep];
+}
+
+function chooseOption(index) {
+    if (!currentNode || !currentNode.choices) return;
+    
+    const choice = currentNode.choices[index];
+    if (!choice) return;
+
+    juryScore += choice.effect;
+    
+    // Vincola il punteggio della giuria tra 0 e 100 per non far sballare la barra grafica
+    juryScore = Math.max(0, Math.min(100, juryScore));
+
+    console.log(choice.response);
+
+    // Passa alla battuta successiva dopo la scelta
+    nextDialog();
+}
+function drawInterfaceAndCourtroom() {
+    if (typeof room !== 'undefined' && room === 3) {
+        drawCourtroomScene();
+    }
+
+    // ==========================================
+    // 🏃‍♂️ UI IN MODALITÀ ESPLORAZIONE ("world")
+    // ==========================================
+    if (gameState === "world" && !isTyping) {
+        ctx.textAlign = 'center';
+        ctx.font = 'bold 18px Arial';
+        
+        if (typeof canReflect !== 'undefined' && canReflect && !reflectionDone) {
+            ctx.fillStyle = '#fff';
+            ctx.fillText("[R] Rifletti", player.x + 12, player.y - 25);
+        }
+        
+        // Scritta per Socrate (Stanza 3)
+       if (room === 3) {
+            if (canStartDialog) {
+                ctx.fillStyle = "#f1c40f";
+                ctx.font = "bold 16px Georgia";
+                ctx.fillText("[E] Aiuta Socrate", player.x + 25, player.y - 20); 
+            }
+            // Nella stanza 3 non devono apparire altre scritte di interazione sopra Socrate!
+        } 
+        // Scritta per altri NPC (Solo Stanze 1 e 2)
+        else if (nearbyInteractable && nearbyInteractable.id_name !== 'socrate') {
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 18px Arial';
+            ctx.fillText("[E] Interagisci", player.x + 12, player.y - 20);
+        }
+        
+        // Eventi globali a schermo intero
+        if (typeof globalEventTimer !== 'undefined' && globalEventTimer > 0) {
+            ctx.fillStyle = 'rgba(0,0,0,0.7)';
+            ctx.fillRect(0, 0, 1200, 640);
+            ctx.fillStyle = '#f1c40f';
+            ctx.font = 'bold 42px Georgia';
+            ctx.fillText(globalEventMessage, 600, 320);
+            globalEventTimer--;
+        }
+        ctx.clearRect(0, 0, 1200, 640);
+
+   
+function draw() {
+    // 1. Pulizia del canvas (se non lo fa già una tua funzione interna)
+    ctx.clearRect(0, 0, 1200, 640);
+
+    // 2. CONTROLLO DEGLI STATI DI GIOCO
+    if (gameState === "world") {
+        // Qui ci sarà il tuo codice originale o la tua funzione, ad esempio:
+        drawWorld(); 
+    } 
+    else if (gameState === "dialog") {
+        // Logica per i dialoghi sopra il mondo
+        drawWorld();
+        drawDialogue(); 
+    }
+    // 🏛️ INCOLLA QUESTO BLOCCO QUI DENTRO!
+    else if (gameState === "platoGame") {
+        if (typeof drawPlatoGameScreen === 'function') {
+            drawPlatoGameScreen();
+        } else {
+            // Segnale di emergenza visivo se non trova la funzione
+            ctx.fillStyle = "red";
+            ctx.font = "30px Arial";
+            ctx.fillText("Stato platoGame attivo, ma drawPlatoGameScreen() non trovata!", 100, 100);
+        }
+    }
+    // ... eventuali altri stati (vittoria, game over, ecc.)
+}
+    }
+
+    // ==========================================
+    // 🏛️ UI IN MODALITÀ DIALOGO TRIBUNALE ("dialog")
+    // ==========================================
+    if (gameState === "dialog") {
+        if (currentNode) {
+            drawDialogUI(); // Questa disegna il box nero e le scelte 1, 2, 3
+        } else {
+            // Forza il primo nodo se per qualche motivo è nullo
+            currentNode = dialogueScene[dialogStep];
+        }
+    }
+}
+
+function drawDialogUI() {
+    if (gameState !== "dialog" || !currentNode) return;
+
+    const canvasWidth = 1200; 
+    const centerX = canvasWidth / 2; 
+
+    // ==========================================
+    // 🏢 1. SFONDO CINEMATICO (Box di dialogo)
+    // ==========================================
+    ctx.fillStyle = "rgba(15, 15, 20, 0.94)"; 
+    ctx.fillRect(50, 430, canvasWidth - 100, 190); 
+    
+    ctx.strokeStyle = "#dbb13b";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(50, 430, canvasWidth - 100, 190);
+
+   // ==========================================
+    // 🗣️ 2. RENDERING DEL NOME (PARLANTE)
+    // ==========================================
+    ctx.font = "bold 22px Georgia";
+    ctx.textAlign = "center"; 
+    
+    if (currentNode.speaker === "socrate") {
+        ctx.fillStyle = "#f1c40f"; 
+        ctx.fillText("🏛️ SOCRATE", centerX, 465);
+    } else if (currentNode.speaker === "meleto") {
+        ctx.fillStyle = "#e74c3c"; 
+        ctx.fillText("⚖️ MELETO", centerX, 465);
+    } else if (currentNode.speaker === "giuria") {
+        ctx.fillStyle = "#3498db"; // Colore istituzionale azzurro per il verdetto
+        ctx.fillText("⚖️ VERDETTO DEL TRIBUNALE", centerX, 465);
+    }
+
+    // ==========================================
+    // 📜 3. FUNZIONE DI WRAPPING AUTOMATICO (Auto A Capo)
+    // ==========================================
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "17px Georgia"; // Leggermente più piccolo per far stare i monologhi lunghi
+
+    const maxWidth = 1040; // Larghezza massima consentita all'interno della scatola (1200 - 160 di margini)
+    const lineHeight = 24; // Spazio tra una riga e l'altra
+    let startY = 495;      // Altezza iniziale del testo dentro il box
+
+    // Rimuoviamo i vecchi \n artificiali e uniamo tutto in un'unica stringa pulita,
+    // mantenendo solo i doppi a capo (\n\n) se usati per separare i dialoghi di Meleto/Socrate
+    let rawText = currentNode.text.replace(/(?<!\n)\n(?!\n)/g, " "); 
+    let paragraphs = rawText.split("\n\n");
+
+    paragraphs.forEach(paragraph => {
+        let words = paragraph.split(" ");
+        let currentLine = "";
+
+        for (let n = 0; n < words.length; n++) {
+            let testLine = currentLine + words[n] + " ";
+            let metrics = ctx.measureText(testLine);
+            let testWidth = metrics.width;
+
+            // Se la parola fa sballare il testo fuori dalla scatola, disegna la riga precedente e resetta
+            if (testWidth > maxWidth && n > 0) {
+                ctx.fillText(currentLine.trim(), centerX, startY);
+                currentLine = words[n] + " ";
+                startY += lineHeight;
+            } else {
+                currentLine = testLine;
+            }
+        }
+        // Disegna l'ultima riga rimasta del paragrafo
+        ctx.fillText(currentLine.trim(), centerX, startY);
+        startY += lineHeight; 
+    });
+
+    // ==========================================
+    // 🕹️ 4. OPZIONI DI SCELTA O SUGGERIMENTI
+    // ==========================================
+    if (currentNode.choices) {
+        ctx.font = "16px Arial";
+        const colWidth = (canvasWidth - 140) / 3; 
+        
+        currentNode.choices.forEach((c, i) => {
+            let colX = 70 + (i * colWidth) + (colWidth / 2);
+            
+            // Box di sfondo delle scelte
+            ctx.fillStyle = "rgba(255, 255, 255, 0.05)";
+            ctx.fillRect(70 + (i * colWidth) + 10, 560, colWidth - 20, 45);
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+            ctx.strokeRect(70 + (i * colWidth) + 10, 560, colWidth - 20, 45);
+
+            // Numero Scelta
+            ctx.fillStyle = "#f39c12"; 
+            ctx.font = "bold 15px Arial";
+            ctx.fillText(`[ ${i + 1} ]`, colX, 578);
+            
+            // Testo Scelta (Adattato nel suo mini-box)
+            ctx.fillStyle = "#e0e0e0"; 
+            ctx.font = "12px Arial";
+            ctx.fillText(c.label, colX, 594);
+        });
+    } else {
+        ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
+        ctx.font = "italic 13px Arial";
+        ctx.fillText("Premi [ E ] per continuare l'udienza", centerX, 605);
+    }
+
+    // ==========================================
+    // 📊 5. BARRA STATO DELLA GIURIA
+    // ==========================================
+    const barWidth = 300;
+    const barX = centerX - (barWidth / 2); 
+    const barY = 415; 
+    
+    ctx.fillStyle = "#2c3e50";
+    ctx.fillRect(barX, barY, barWidth, 8);
+    
+    ctx.fillStyle = juryScore >= 50 ? "#2ecc71" : "#e67e22";
+    ctx.fillRect(barX, barY, (juryScore / 100) * barWidth, 8);
+    
+    ctx.fillStyle = "#f1c40f";
+    ctx.font = "bold 11px Arial";
+    ctx.fillText(`FAVORE DEI GIUDICI: ${juryScore}%`, centerX, barY - 5);
+}
+
+function checkDialogZone() {
+    canStartDialog = false;
+
+    if (room !== 3) return;
+    
+    // Se il processo è già terminato e la chiave è spawnata, interrompiamo la zona di attivazione
+    if (keySpawned) return;
+
+    const socrateObj = room3NPCs.find(npc => npc.id_name === "socrate");
+    if (!socrateObj) return;
+
+    const dist = distance(player, socrateObj);
+    if (dist < 90) {
+        canStartDialog = true;
+    }
+}
+
+function getAudienceStyle(index) {
+    const skinTones = ['#f2c9a0', '#e0b089', '#d1a06a'];
+    const hairColors = ['#2b2b2b', '#3a2a1a', '#5c4a3a', '#1a1a1a'];
+
+    return {
+        skin: skinTones[index % skinTones.length],
+        hair: hairColors[index % hairColors.length]
+    };
+}
+
+function drawCourtroomScene() {
+
+    // =========================
+    // PAVIMENTO
+    // =========================
+    for (let i = 0; i < 1200; i += 60) {
+        for (let j = 0; j < 640; j += 60) {
+            ctx.fillStyle = ((i + j) / 60 % 2 === 0) ? '#f5f6fa' : '#dcdde1';
+            ctx.fillRect(i, j, 60, 60);
+        }
+    }
+
+    drawAtmosphericLighting();
+
+    // =========================
+    // COLONNE (3 PER LATO, IN FILA VERTICALE)
+    // =========================
+    const colY = [140, 320, 500];
+
+    colY.forEach(y => {
+        drawClassicColumn(60, y);
+        drawClassicColumn(1120, y);
+    });
+
+    // =========================
+    // GIURIA IN ALTO
+    // =========================
+    for (let i = 0; i < 5; i++) {
+        drawJudge(420 + i * 90, 70);
+    }
+
+    // =========================
+    // SOCRATE / MELETO
+    // =========================
+    let socrateNPC = room3NPCs.find(n => n.id_name === 'socrate');
+    let meletoNPC = room3NPCs.find(n => n.id_name === 'meleto');
+
+    if (socrateNPC) drawPhilosopherCourt(socrateNPC);
+    if (meletoNPC) drawPhilosopherCourt(meletoNPC);
+
+    // =========================
+    // PANCA CONTINUA + PUBBLICO
+    // =========================
+    const rows = 6;
+    const startY = 280;
+    const gap = 60;
+    let seatIndex = 0;
+
+    for (let r = 0; r < rows; r++) {
+        let y = startY + r * gap;
+
+        // SINISTRA (Colonne da 2 a 8)
+        for (let c = 2; c <= 8; c++) {
+            let x = c * 60;
+            ctx.fillStyle = '#5a3d2b';
+            ctx.fillRect(x - 5, y + 18, 30, 12);
+            drawAudienceBackOnly(x, y, seatIndex++);
+        }
+
+        // DESTRA (Colonne da 11 a 17)
+        for (let c = 11; c <= 17; c++) {
+            let x = c * 60;
+            ctx.fillStyle = '#5a3d2b';
+            ctx.fillRect(x - 5, y + 18, 30, 12);
+            drawAudienceBackOnly(x, y, seatIndex++);
+        }
+    }
+
+    // =========================================
+    // 🚪 DISEGNO PORTA REALE A NORD (SOSTITUITO IL RETTANGOLO ERRONEO)
+    // =========================================
+    drawDoor(3); 
+
+    // Disegna il giocatore sopra l'ambiente
+    drawPlayer(player.x, player.y);
+
+    // =========================================
+    // 🔑 RENDERING DELLA CHIAVE (Se visibile a terra)
+    // =========================================
+    if (typeof roomKey !== 'undefined' && roomKey.visible && !roomKey.collected) {
+        ctx.save();
+        ctx.fillStyle = "#f1c40f"; // Oro lucido
+        ctx.beginPath();
+        ctx.arc(roomKey.x, roomKey.y, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillRect(roomKey.x - 2, roomKey.y, 4, 15);
+        ctx.fillRect(roomKey.x - 2, roomKey.y + 11, 6, 4);
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 11px Arial";
+        ctx.textAlign = "center";
+        ctx.restore();
+    }
+}
+
+function checkKeyCollection() {
+    if (!roomKey.visible || roomKey.collected) return;
+
+    // Calcolo distanza geometrica tra il giocatore e la chiave
+    let distX = player.x - roomKey.x;
+    let distY = player.y - roomKey.y;
+    let distance = Math.sqrt(distX * distX + distY * distY);
+
+    // Se il giocatore è a meno di 35 pixel dalla chiave, la raccoglie automatically
+    if (distance < 35) {
+        roomKey.collected = true;
+        roomKey.visible = false;
+        
+        // Setup di un messaggio a schermo intero usando il tuo sistema globale già esistente
+        globalEventMessage = "Hai ottenuto la Chiave dell'Ultima Stanza!";
+        globalEventTimer = 120; // Mostra il messaggio per circa 2 secondi
+    }
+}
+
+function isBlocked(x, y) {
+    // =========================
+    // BORDI MAPPA
+    // =========================
+    if (x < 0 || x > 1160 || y < 0 || y > 600) {
+        return true;
+    }
+
+    // =========================
+    // PUBBLICO (AREA INTERA)
+    // =========================
+    const tileX = Math.floor(x / 60);
+    const tileY = Math.floor(y / 60);
+
+    // sinistra pubblico
+    if (tileX >= 2 && tileX <= 8 && tileY >= 4 && tileY <= 9) {
+        return true;
+    }
+
+    // destra pubblico
+    if (tileX >= 11 && tileX <= 17 && tileY >= 4 && tileY <= 9) {
+        return true;
+    }
+
+    // =========================
+    // SOCRATE + MELETO (AREA SEMPLICE)
+    // =========================
+    if (x > 360 && x < 460 && y > 150 && y < 250) {
+        return true;
+    }
+
+    if (x > 700 && x < 820 && y > 150 && y < 250) {
+        return true;
+    }
+
+    return false;
+}
+
+function drawColumnFire(x, y) {
+    ctx.save();
+
+    let gradient = ctx.createRadialGradient(x, y, 2, x, y, 25);
+    gradient.addColorStop(0, 'rgba(255,200,0,0.9)');
+    gradient.addColorStop(0.5, 'rgba(255,80,0,0.4)');
+    gradient.addColorStop(1, 'rgba(255,0,0,0)');
+
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(x, y, 25, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+}
+function drawJudge(x, y) {
+
+    ctx.save();
+
+    // panca giuria
+    ctx.fillStyle = '#4a3b2a';
+    ctx.fillRect(x - 25, y + 25, 50, 10);
+
+    // toga giudice (colori istituzionali)
+    ctx.fillStyle = '#1f2a44';
+    ctx.fillRect(x - 12, y + 10, 24, 30);
+
+    // testa
+    ctx.fillStyle = '#f2c9a0';
+    ctx.fillRect(x - 10, y, 20, 15);
+
+    // capelli (seri, non cartoon)
+    ctx.fillStyle = '#2b2b2b';
+    ctx.fillRect(x - 10, y, 20, 4);
+
+    // occhi
+    ctx.fillStyle = '#111';
+    ctx.fillRect(x - 5, y + 6, 3, 3);
+    ctx.fillRect(x + 2, y + 6, 3, 3);
+
+    ctx.restore();
+}
+
+function drawPhilosopherCourt(npc) {
+    ctx.save();
+
+    let isSocrate = npc.id_name === 'socrate';
+
+    // ombra
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath();
+    ctx.ellipse(npc.x + 25, npc.y + 78, 25, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // toga filosofica
+    ctx.fillStyle = isSocrate ? '#7f8c8d' : '#c0392b';
+    ctx.fillRect(npc.x, npc.y + 18, npc.w, npc.h - 18);
+
+    // testa
+    ctx.fillStyle = '#ffdbac';
+    ctx.fillRect(npc.x + 8, npc.y, 34, 18);
+
+    // occhi
+    ctx.fillStyle = '#111';
+    ctx.fillRect(npc.x + 14, npc.y + 7, 4, 4);
+    ctx.fillRect(npc.x + 28, npc.y + 7, 4, 4);
+
+    // capelli (Socrate più “saggio”)
+    ctx.fillStyle = isSocrate ? '#ecf0f1' : '#2b2b2b';
+    ctx.fillRect(npc.x + 8, npc.y, 34, 5);
+
+    // barba Socrate
+    if (isSocrate) {
+        ctx.fillStyle = '#dfe6e9';
+        ctx.fillRect(npc.x + 10, npc.y + 18, 30, 18);
+    }
+
+    ctx.restore();
+}
+
+function drawAudienceBackOnly(x, y, seatIndex) {
+
+    ctx.save();
+
+    // vestiti variabili ma STABILI (NON random ogni frame)
+    const outfits = [
+        '#3b3b3b', // grigio
+        '#2c3e50', // blu scuro
+        '#4b2c20', // marrone
+        '#1f1f1f', // nero
+        '#5d4037'  // marrone chiaro
+    ];
+
+    const skins = [
+        '#f2c9a0',
+        '#e0b089',
+        '#d1a06a'
+    ];
+
+    let outfit = outfits[seatIndex % outfits.length];
+    let skin = skins[seatIndex % skins.length];
+
+    // CORPO (ALLINEATO PERFETTO SOPRA PANCA)
+    ctx.fillStyle = outfit;
+    ctx.fillRect(x, y + 10, 20, 42);
+
+    // TESTA (sopra schiena)
+    ctx.fillStyle = skin;
+    ctx.fillRect(x + 4, y, 12, 14);
+
+    // CAPELLI (solo dietro)
+    ctx.fillStyle = '#2b2b2b';
+    ctx.fillRect(x + 4, y, 12, 6);
+
+    ctx.restore();
+}
+
+function drawDoor(currentRoom) {
+    // Scegli lo stato di apertura in base alla stanza
+    let isOpen = false;
+    if (currentRoom === 1) isOpen = puzzle.doorOpen;
+    if (currentRoom === 2) isOpen = goldenKey.collected; // Se presa la chiave d'oro, la porta si considera sbloccata/aperta
+    if (currentRoom === 3) isOpen = room3Door.open;
+    if (currentRoom === 4) isOpen = finalKeyTaken;
+    ctx.save();
+    // Cornice della porta (identica in cima al centro dello schermo)
+    ctx.fillStyle = '#2c3e50';
+    ctx.fillRect(540, 0, 120, 40);
+    
+    if (isOpen) {
+        // Interno della porta aperta (Nero/Vuoto profondo)
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(550, 0, 100, 40);
+    } else {
+        // Porta Chiusa (Legno massiccio con venature e borchie)
+        ctx.fillStyle = '#7f8c8d'; 
+        ctx.fillRect(550, 0, 100, 40);
+        
+        // Dettaglio linee della porta
+        ctx.strokeStyle = '#2c3e50';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(600, 0); ctx.lineTo(600, 40); // Linea centrale di battuta
+        ctx.stroke();
+        
+        // Maniglie / Borchie d'oro
+        ctx.fillStyle = '#f1c40f';
+        ctx.beginPath(); ctx.arc(585, 20, 5, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(615, 20, 5, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+}
+
+function drawAtmosphericLighting() {
+    const canvasW = ctx.canvas.width;
+    const canvasH = ctx.canvas.height;
+
+    ctx.save();
+    
+    // 1. PENOMBRA MOLTO LEGGERA (Stanza nettamente più chiara e visibile)
+    ctx.globalCompositeOperation = 'multiply';
+    
+    let ambientGlow = ctx.createRadialGradient(
+        canvasW / 2, canvasH / 2, canvasH / 1.5, 
+        canvasW / 2, canvasH / 2, canvasW
+    );
+    // Valori alti: la stanza adesso è illuminata e i dettagli si vedono benissimo
+    ambientGlow.addColorStop(0, '#bbbbbb'); 
+    ambientGlow.addColorStop(1, '#777777'); 
+    
+    ctx.fillStyle = ambientGlow;
+    ctx.fillRect(0, 0, canvasW, canvasH);
+    
+    ctx.restore();
+
+    // 2. EFFETTI DI LUCE SOFFUSA (Colonne e Statue)
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter'; 
+
+    // 🔥 EFFETTO TARANTELLA SULLE COLONNE (Morbido e suggestivo)
+    if (typeof pillars !== 'undefined' && room === 1) {
+        pillars.forEach(p => {
+            let colX = p[0];
+            let colY = p[1]; 
+            
+            let t = Date.now() * 0.006;
+            let flicker = Math.sin(t * 8) * 5; 
+
+            // Luce calda ma più trasparente per non bruciare i dettagli della colonna
+            let columnGlow = ctx.createRadialGradient(
+                colX, colY - 10, 5,
+                colX, colY - 10, 150 + flicker
+            );
+            columnGlow.addColorStop(0, 'rgba(255, 130, 40, 0.35)'); 
+            columnGlow.addColorStop(0.4, 'rgba(255, 100, 20, 0.12)'); 
+            columnGlow.addColorStop(1, 'transparent'); 
+            
+            ctx.fillStyle = columnGlow;
+            ctx.beginPath();
+            ctx.arc(colX, colY - 10, 150 + flicker, 0, Math.PI * 2);
+            ctx.fill();
+        });
+    }
+
+    // 🗿 ALONI DELLE STATUE ATTIVATE (Trasparenti, non coprono il disegno!)
+    if (room === 1) {
+        room1Props.forEach(p => {
+            if (p.id === 'statue' && puzzle.solvedQuizzes.includes(p.id_name)) {
+                let t = Date.now() * 0.004;
+                let pulse = Math.sin(t * 5) * 6;
+                
+                let statueGlow = ctx.createRadialGradient(
+                    p.x + p.w/2, p.y + p.h/2, 10,
+                    p.x + p.w/2, p.y + p.h/2, 120 + pulse
+                );
+                
+                // Convertiamo i colori in RGBA semitrasparenti (solo un'ombra di colore)
+                let r=0, g=0, b=0;
+                if(p.id_name === 'talete') { r=52; g=152; b=219; }       // Azzurro morbido
+                if(p.id_name === 'anassimandro') { r=155; g=89; b=182; } // Viola morbido
+                if(p.id_name === 'anassimene') { r=189; g=195; b=199; }   // Grigio/Bianco mistico
+
+                statueGlow.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.25)`); // Solo il 25% di opacità al centro!
+                statueGlow.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.08)`);
+                statueGlow.addColorStop(1, 'transparent');
+                
+                ctx.fillStyle = statueGlow;
+                ctx.beginPath();
+                ctx.arc(p.x + p.w/2, p.y + p.h/2, 120 + pulse, 0, Math.PI*2);
+                ctx.fill();
+            }
+        });
+    }
+
+    ctx.restore();
+}
+
+function completePhilosopherGame(name) {
+    // Se è il primo completato
+    if (!firstCompleted) {
+        firstCompleted = name;
+
+        if (name === "eraclito") {
+            dialogue = [
+                "PER SBLOCCARE LA CHIAVE D'ORO",
+                "IMMERGITI NELLA VERA ESSENZA DI PARMENIDE"
+            ];
+        } else {
+            dialogue = [
+                "PER SBLOCCARE LA CHIAVE D'ORO",
+                "PARLA CON ERACLITO E COMPRENDI IL LOGOS"
+            ];
+        }
+        return;
+    }
+
+    // Se è il secondo → chiave completa
+    if (firstCompleted !== name) {
+        keyUnlocked = true;
+
+        dialogue = [
+            "HAI SBLOCCATO LA CHIAVE D'ORO",
+            "ORA IL CAMMINO È APERTO"
+        ];
+        
+        // Attiviamo la chiave a terra alle coordinate corrette Y = 450
+        if (typeof goldenKey !== 'undefined') {
+            goldenKey.active = true;
+            goldenKey.x = 600;
+            goldenKey.y = 450;
+            goldenKey.collected = false;
+        }
+    }
+
+    // ==========================================
+    // 🛡️ BLINDO GLI NPC: PARMENIDE NON SPARIRÀ MAI
+    // ==========================================
+    // Se per qualche motivo l'array è stato svuotato o filtrato altrove,
+    // lo ricreiamo qui a forza assicurandoci che ci siano ENTRAMBI.
+    if (typeof room2NPCs !== 'undefined') {
+        room2NPCs = [
+            { id: 'npc', id_name: 'eraclito', x: 300, y: 200, w: 50, h: 80, info: "ERACLITO: Tutto scorre... Premi P per metterti alla prova." },
+            { id: 'npc', id_name: 'parmenide', x: 900, y: 200, w: 50, h: 80, info: "PARMENIDE: L'Essere è, il non-essere non è. Premi J per la Verità." }
+        ];
+    }
+}
+
+function unlockGoldenKeyPiece(name) {
+    if (!window.goldenKeyPieces) window.goldenKeyPieces = [];
+    
+    if (!window.goldenKeyPieces.includes(name)) {
+        window.goldenKeyPieces.push(name);
+    }
+}
+
+function distance(a, b) {
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+function drawPlatoRoom() {
+    // Se siamo nella schermata di vittoria, interrompiamo il disegno della stanza standard 
+    // e mostriamo SOLO la schermata di vittoria nera, senza omino.
+    if (gameState === "platoWin") {
+        drawPlatoWinScreen();
+        return; 
+    }
+
+    // 1. Colonne laterali
+    room4Pillars.forEach(p => {
+        if (typeof drawClassicColumn === 'function') {
+            drawClassicColumn(p.x, p.y);
+        } else {
+            ctx.fillStyle = "#dcdde1"; ctx.fillRect(p.x, p.y, 60, 130);
+        }
+    });
+
+    // 2. Controllo dello Stato Grafico (Prima o Durante il Minigioco)
+    if (!platoneGameAttivo) {
+        // Mostra le Grandi Statue fino a quando non si gioca
+        drawSensibleStatue(250, 280);
+        ctx.fillStyle = "#7f8c8d"; ctx.font = "bold 14px Georgia"; ctx.textAlign = "center";
+        ctx.fillText("IL MONDO SENSIBILE", 290, 385);
+
+        drawIdeasStatue(870, 280);
+        ctx.fillStyle = "#f1c40f"; ctx.font = "bold 14px Georgia"; ctx.textAlign = "center";
+        ctx.fillText("L'IPERURANIO", 910, 385);
+
+    } else {
+        // --- GRAFICA DEL MINIGIOCO ATTIVO ---
+        ctx.strokeStyle = "rgba(52, 152, 219, 0.3)";
+        ctx.lineWidth = 4; ctx.setLineDash([15, 15]);
+        ctx.beginPath(); ctx.moveTo(120, 320); ctx.lineTo(1080, 320); ctx.stroke();
+        ctx.setLineDash([]); 
+
+        ctx.fillStyle = "rgba(0, 0, 0, 0.15)";
+        ctx.font = "bold 22px Georgia"; ctx.textAlign = "left";
+        ctx.fillText("IPERURANIO (Modelli Eterni)", 150, 70);
+        ctx.fillText("MONDO SENSIBILE (Copie Imperfette)", 150, 590);
+
+        // Disegno i punti di interazione del minigioco usando l'array corretto (platoGameObjects)
+        let oggettiGioco = (typeof platoGameObjects !== 'undefined' && platoGameObjects.length > 0) ? platoGameObjects : room4Collisions;
+        
+        oggettiGioco.forEach(obj => {
+            if (!obj.id) return;
+            
+            if (obj.id.startsWith("copia") || obj.type === "copia") {
+                ctx.fillStyle = "#95a5a6"; ctx.fillRect(obj.x, obj.y, obj.w || 60, obj.h || 60);
+                ctx.strokeStyle = "#34495e"; ctx.strokeRect(obj.x, obj.y, obj.w || 60, obj.h || 60);
+                if (!obj.attivato && !obj.collegato) {
+                    ctx.strokeStyle = "#c0392b"; ctx.beginPath();
+                    ctx.moveTo(obj.x+10, obj.y+10); ctx.lineTo(obj.x+(obj.w||60)-10, obj.y+(obj.h||60)-10); ctx.stroke();
+                }
+                ctx.fillStyle = "#666"; ctx.font = "12px Arial"; ctx.textAlign = "center";
+                ctx.fillText(obj.nome, obj.x + (obj.w||60)/2, obj.y + (obj.h||60) + 15);
+            } 
+            else if (obj.id.startsWith("idea") || obj.type === "idea") {
+                let auraPulse = Math.sin(Date.now() * 0.007) * 4;
+                ctx.fillStyle = "rgba(241, 196, 15, 0.3)";
+                ctx.beginPath(); ctx.arc(obj.x+30, obj.y+30, 35 + auraPulse, 0, Math.PI*2); ctx.fill();
+                
+                ctx.fillStyle = "#f1c40f"; ctx.fillRect(obj.x, obj.y, obj.w || 60, obj.h || 60);
+                ctx.fillStyle = "#f39c12"; ctx.font = "bold 12px Georgia"; ctx.textAlign = "center";
+                ctx.fillText(obj.nome, obj.x + (obj.w||60)/2, obj.y - 15);
+            }
+        });
+    }
+
+    // 3. Platone al centro
+    if (typeof drawPhilosopher === 'function') {
+        drawPhilosopher(platoneNPC);
+    } else {
+        ctx.fillStyle = platoneNPC.color; ctx.fillRect(platoneNPC.x, platoneNPC.y, platoneNPC.w, platoneNPC.h);
+    }
+
+    // --- PROMPT VISIVO "[E] PARLA CON PLATONE" ---
+    if (!platoneGameAttivo && !puzzleDualismoCompletato && gameState !== "dialog") {
+        let distX = (player.x + player.w/2) - (platoneNPC.x + platoneNPC.w/2);
+        let distY = (player.y + player.h/2) - (platoneNPC.y + platoneNPC.h/2);
+        let distanza = Math.sqrt(distX * distX + distY * distY);
+
+        if (distanza < 75) {
+            ctx.save();
+            ctx.fillStyle = "#f1c40f"; 
+            ctx.font = "bold 14px Arial";
+            ctx.textAlign = "center";
+            ctx.shadowColor = "black"; ctx.shadowBlur = 4;
+            ctx.fillText("[E] Parla con Platone", player.x + player.w/2, player.y - 20);
+            ctx.restore();
+        }
+    }
+
+    // 4. Scia di trasporto della gemma
+    if (gemmaSelezionata) {
+        ctx.fillStyle = "#3498db";
+        ctx.beginPath(); ctx.arc(player.x + player.w/2, player.y - 10, 6, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // ==========================================
+// 🚪 PORTA ROOM 4
+// ==========================================
+drawDoor(4);
+
+    // Controllo di transizione automatica a fine connessioni
+    if (typeof interactionState !== 'undefined' && interactionState.connections && interactionState.connections.length === 3 && !puzzleDualismoCompletato) {
+        puzzleDualismoCompletato = true;
+        gameState = "platoWin";
+    }
+}
+
+
+function setupRoom4Collisions() {
+    room4Collisions = [];
+    
+    // 1. Collisioni fisse delle Colonne Laterali (Bloccano la base inferiore)
+    room4Pillars.forEach(p => {
+        room4Collisions.push({ x: p.x + 5, y: p.y + 90, w: 50, h: 40 }); 
+    });
+
+    // 2. Collisione fissa di Platone al centro (Calcolata sulla sua hitbox dei piedi)
+    room4Collisions.push({ 
+        x: platoneNPC.x, 
+        y: platoneNPC.y + 40, 
+        w: platoneNPC.w, 
+        h: 20, 
+        id: "platone_blocco" 
+    });
+
+    // 3. Collisioni condizionate dallo stato del dialogo
+    if (!platoneDialogoFatto) {
+        // BLOCCO DELLE DUE GRANDI STATUE INIZIALI
+        // Statua Sensibile (Sinistra)
+        room4Collisions.push({ x: 250, y: 320, w: 80, h: 40, id: "decoro_sensibile" });
+        // Statua Idee (Destra)
+        room4Collisions.push({ x: 870, y: 320, w: 80, h: 40, id: "decoro_idee" });
+    } else {
+        // BLOCCO DEI PUNTI INTERATTIVI DEL MINIGIOCO (Sdoppiamento)
+        // I 3 elementi corrotti in basso
+        room4Collisions.push({ x: 250, y: 450, w: 60, h: 60, id: "copia_triangolo", nome: "Forma Imperfetta", attivato: false });
+        room4Collisions.push({ x: 570, y: 450, w: 60, h: 60, id: "copia_uomo", nome: "Uomo Imperfetto", attivato: false });
+        room4Collisions.push({ x: 890, y: 450, w: 60, h: 60, id: "copia_giustizia", nome: "Valore Imperfetto", attivato: false });
+
+        // Le 3 Idee pure in alto
+        room4Collisions.push({ x: 250, y: 130, w: 60, h: 60, id: "idea_triangolo", nome: "Idea di Forma" });
+        room4Collisions.push({ x: 570, y: 130, w: 60, h: 60, id: "idea_uomo", nome: "Idea di Uomo" });
+        room4Collisions.push({ x: 890, y: 130, w: 60, h: 60, id: "idea_giustizia", nome: "Idea di Giustizia" });
+    }
+}
+
+// Disegna la Statua del Mondo Sensibile (Materia, Mutamento, Imperfezione)
+function drawSensibleStatue(x, y) {
+    ctx.save();
+
+    // 1. Base della statua (Pietra grezza crepata)
+    ctx.fillStyle = "#566573";
+    ctx.fillRect(x, y + 40, 80, 40); // Base inferiore
+    ctx.fillStyle = "#7f8c8d";
+    ctx.fillRect(x + 10, y + 25, 60, 15); // Gradino superiore della base
+
+    // Crepe sulla base
+    ctx.strokeStyle = "#2c3e50";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x + 20, y + 40); ctx.lineTo(x + 25, y + 55); ctx.lineTo(x + 15, y + 70);
+    ctx.moveTo(x + 65, y + 45); ctx.lineTo(x + 60, y + 65);
+    ctx.stroke();
+
+    // 2. Elemento sopra la base: Un Albero della Natura (Simbolo del mondo fisico e mutevole)
+    // Tronco contorto
+    ctx.fillStyle = "#5d4037";
+    ctx.beginPath();
+    ctx.moveTo(x + 35, y + 25);
+    ctx.lineTo(x + 30, y);
+    ctx.lineTo(x + 45, y - 5);
+    ctx.lineTo(x + 45, y + 25);
+    ctx.fill();
+
+    // Chioma asimmetrica (Foglie della natura terrena)
+    ctx.fillStyle = "#1e8449";
+    ctx.beginPath();
+    ctx.arc(x + 25, y - 10, 18, 0, Math.PI * 2);
+    ctx.arc(x + 45, y - 15, 22, 0, Math.PI * 2);
+    ctx.arc(x + 55, y, 15, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Un tocco di foglie secche/cadenti (Simbolo del tempo che passa nel mondo sensibile)
+    ctx.fillStyle = "#d35400";
+    ctx.fillRect(x + 20, y + 15, 4, 4);
+    ctx.fillRect(x + 58, y + 20, 4, 4);
+
+    ctx.restore();
+}
+
+// Disegna la Statua del Mondo delle Idee (Iperuranio, Perfezione, Eternità)
+function drawIdeasStatue(x, y) {
+    ctx.save();
+
+    let pulse = Math.sin(Date.now() * 0.005) * 4;
+
+    // 1. Aura di luce divina retrostante
+    let aura = ctx.createRadialGradient(x + 40, y, 5, x + 40, y, 45 + pulse);
+    aura.addColorStop(0, 'rgba(241, 196, 15, 0.4)');
+    aura.addColorStop(1, 'rgba(241, 196, 15, 0)');
+    ctx.fillStyle = aura;
+    ctx.beginPath();
+    ctx.arc(x + 40, y, 45 + pulse, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 2. Base della statua (Marmo bianco lucido e oro)
+    ctx.fillStyle = "#cbd5e1"; // Marmo bianco
+    ctx.fillRect(x, y + 40, 80, 40);
+    ctx.fillStyle = "#f1c40f"; // Finitura dorata superiore
+    ctx.fillRect(x + 5, y + 25, 70, 15);
+
+    // Righe verticali eleganti sulla base (stile tempio perfetto)
+    ctx.strokeStyle = "#b2bec3";
+    ctx.lineWidth = 2;
+    for(let i = x + 15; i <= x + 65; i += 15) {
+        ctx.beginPath(); ctx.moveTo(i, y + 40); ctx.lineTo(i, y + 80); ctx.stroke();
+    }
+
+    // 3. Elemento Fluttuante sopra la base: I Solidi Geometrici Perfetti (Simboli delle Idee di Platone)
+    // Triangolo Equilatero Dorato (Forma geometrica immutabile)
+    ctx.fillStyle = "#f39c12";
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 2;
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = "#f1c40f"; // Bagliore all'oggetto
+
+    ctx.beginPath();
+    ctx.moveTo(x + 40, y - 25 + pulse * 0.5);       // Vertice alto
+    ctx.lineTo(x + 15, y + 10 + pulse * 0.5);       // Angolo sinistro
+    ctx.lineTo(x + 65, y + 10 + pulse * 0.5);       // Angolo destro
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Piccola Sfera di Luce Pura al centro del triangolo
+    ctx.fillStyle = "#ffffff";
+    ctx.shadowBlur = 15;
+    ctx.beginPath();
+    ctx.arc(x + 40, y - 2 + pulse * 0.5, 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+}
+
+let platoGameObjects = []; // Array globale per gli oggetti del minigioco
+
+function initPlatoGame() {
+    // 🔥 RESET STATO MINIGIOCO
+    interactionState = {
+        selectedStatue: null,
+        connections: []
+    };
+
+    gemmaSelezionata = null;
+    accoppiamentiCorretti = 0;
+    puzzleDualismoCompletato = false;
+
+    // 🔥 POSIZIONE PLAYER
+    player.x = 100;   // spostato a sinistra
+    player.y = 360;   // centro verticale
+
+    // Popoliamo l'array corretto usato dalle funzioni di disegno e interazione
+    platoStatues = [
+        // IDEE PURE (ALTO - IPERURANIO)
+        {
+            id: "idea_triangolo",
+            world: "iperuranio",
+            type: "triangle",
+            nome: "Idea Forma",
+            x: 180,
+            y: 140,
+            interactDist: 75
+        },
+        {
+            id: "idea_uomo",
+            world: "iperuranio",
+            type: "human",
+            nome: "Idea Uomo",
+            x: 600,
+            y: 140,
+            interactDist: 75
+        },
+        {
+            id: "idea_giustizia",
+            world: "iperuranio",
+            type: "scale",
+            nome: "Idea Giustizia",
+            x: 1020,
+            y: 140,
+            interactDist: 75
+        },
+
+        // COPIE IMPERFETTE (BASSO - MONDO SENSIBILE)
+        {
+            id: "copia_triangolo",
+            world: "sensibile",
+            type: "triangle",
+            nome: "Forma Imperfetta",
+            x: 180,
+            y: 500,
+            interactDist: 75,
+            targetId: "idea_triangolo" // Collega a questa idea
+        },
+        {
+            id: "copia_uomo",
+            world: "sensibile",
+            type: "human",
+            nome: "Uomo Imperfetto",
+            x: 600,
+            y: 500,
+            interactDist: 75,
+            targetId: "idea_uomo" // Collega a questa idea
+        },
+        {
+            id: "copia_giustizia",
+            world: "sensibile",
+            type: "scale",
+            nome: "Valore Imperfetto",
+            x: 1020,
+            y: 500,
+            interactDist: 75,
+            targetId: "idea_giustizia" // Collega a questa idea
+        }
+    ];
+
+    // Per sicurezza, copiamo i dati anche nell'altro array se usato altrove
+    platoGameObjects = platoStatues; 
+}
+
+function drawPlatoGameScreen() {
+   // Se il gioco è vinto, mostra SOLO la schermata di vittoria e blocca il rendering del gioco
+    if (gameState === "platoWin") {
+        drawPlatoWinScreen();
+        return; 
+    }
+    // 1. Sfondo totale: Pavimento a scacchi chiaro
+    for (let i = 0; i < 1200; i += 60) {
+        for (let j = 0; j < 640; j += 60) {
+            ctx.fillStyle = ((i + j) / 60 % 2 === 0) ? '#f5f6fa' : '#dcdde1';
+            ctx.fillRect(i, j, 60, 60);
+            ctx.strokeStyle = 'rgba(0,0,0,0.03)';
+            ctx.strokeRect(i, j, 60, 60);
+        }
+    }
+
+    // 2. Linea di Confine (Azzurra Tratteggiata)
+    ctx.save();
+    ctx.strokeStyle = "rgba(52, 152, 219, 0.5)";
+    ctx.lineWidth = 4;
+    ctx.setLineDash([15, 12]);
+    ctx.beginPath(); 
+    ctx.moveTo(0, 320); 
+    ctx.lineTo(1200, 320); 
+    ctx.stroke();
+    ctx.restore();
+
+    // 3. Testi di Intestazione dei Mondi
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    
+    ctx.font = "bold 24px Georgia";
+    ctx.fillStyle = "#d35400"; 
+    ctx.fillText("IPERURANIO (LE IDEE PERFETTE)", 600, 40);
+
+    ctx.fillStyle = "#2c3e50"; 
+    ctx.fillText("MONDO SENSIBILE (LE COPIE IMPERFETTE)", 600, 590);
+
+    ctx.font = "14px Arial";
+    ctx.fillStyle = "#7f8c8d";
+    
+
+    // 4. DISEGNO DELLE CORDE LUMINOSE (Sotto le statue)
+    ctx.save();
+    // A. Corde collegate stabilmente (Neon Oro)
+    interactionState.connections.forEach(sensibileId => {
+        let sensibileStatue = platoStatues.find(s => s.id === sensibileId);
+        let iperuranioStatue = platoStatues.find(s => s.id === sensibileStatue.targetId);
+
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = "#f1c40f";
+        ctx.strokeStyle = "rgba(241, 196, 15, 0.8)";
+        ctx.lineWidth = 5;
+        
+        ctx.beginPath();
+        ctx.moveTo(sensibileStatue.x, sensibileStatue.y);
+        ctx.lineTo(iperuranioStatue.x, iperuranioStatue.y);
+        ctx.stroke();
+    });
+
+    // B. Corda mobile legata al giocatore (Neon Azzurro)
+    if (interactionState.selectedStatue) {
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = "#3498db"; 
+        ctx.strokeStyle = "rgba(52, 152, 219, 0.9)";
+        ctx.lineWidth = 4;
+
+        ctx.beginPath();
+        ctx.moveTo(interactionState.selectedStatue.x, interactionState.selectedStatue.y);
+        ctx.lineTo(player.x, player.y); 
+        ctx.stroke();
+    }
+    ctx.restore();
+
+    // Variable di supporto per tracciare se mostrare l'UI sopra il player
+    let currentNearbyStatue = null;
+
+    // ... (I punti 1, 2, 3 e 4 rimangono uguali a prima) ...
+
+   // ========================================================
+    // 5. GESTIONE Y-SORTING (DISEGNO AD ALTEZZA DINAMICA)
+    // ========================================================
+    let elementiDaDisegnare = [];
+
+    platoStatues.forEach(statue => {
+        elementiDaDisegnare.push({
+            tipo: "statua",
+            yRiferimento: statue.y + 20,
+            dati: statue
+        });
+    });
+
+    // 🔥 MODIFICA: Inseriamo il giocatore solo se NON siamo nella schermata di vittoria
+    if (typeof player !== 'undefined' && gameState !== "platoWin") {
+        elementiDaDisegnare.push({
+            tipo: "giocatore",
+            yRiferimento: player.y, // I piedi del giocatore
+            dati: player
+        });
+    }
+
+    // Ordina l'array in base alla coordinata Y
+    elementiDaDisegnare.sort((a, b) => a.yRiferimento - b.yRiferimento);
+    elementiDaDisegnare.forEach(elemento => {
+        if (elemento.tipo === "statua") {
+            let statue = elemento.dati;
+            
+            drawPedestal(statue.x, statue.y);
+
+            if (statue.world === "iperuranio") {
+                if (statue.type === "triangle") drawPerfectTriangle(statue.x, statue.y - 40);
+                if (statue.type === "human")    drawPerfectHuman(statue.x, statue.y - 40);
+                if (statue.type === "scale")    drawPerfectScale(statue.x, statue.y - 40);
+            } else {
+                if (statue.type === "triangle") drawImperfectTriangle(statue.x, statue.y - 40);
+                if (statue.type === "human")    drawImperfectHuman(statue.x, statue.y - 40);
+                if (statue.type === "scale")    drawImperfectScale(statue.x, statue.y - 40);
+            }
+
+            if (Math.hypot(player.x - statue.x, player.y - statue.y) < statue.interactDist) {
+                currentNearbyStatue = statue;
+            }
+        } 
+        else if (elemento.tipo === "giocatore") {
+            player.isMoving =
+                keys.w || keys.a || keys.s || keys.d ||
+                keys.ArrowUp || keys.ArrowDown || keys.ArrowLeft || keys.ArrowRight;
+            drawPlayer(player.x, player.y);
+        }
+    });
+
+    // 6. INTERFACCIA UI (Sopra la testa del giocatore, sempre visibile in primo piano)
+    if (currentNearbyStatue && !dialogue && !isTyping) {
+        ctx.save();
+        ctx.textAlign = 'center';
+        
+        if (!interactionState.selectedStatue) {
+            if (currentNearbyStatue.world === "sensibile" && !interactionState.connections.includes(currentNearbyStatue.id)) {
+                ctx.fillStyle = "#333366"; 
+                ctx.font = "bold 16px Georgia";
+                ctx.fillText("[E] Lega corda", player.x + 25, player.y - 20);
+            }
+        } else {
+            if (currentNearbyStatue.world === "iperuranio") {
+                ctx.fillStyle = "#333366"; 
+                ctx.font = "bold 16px Georgia";
+                ctx.fillText("[E] Unisci statue", player.x + 25, player.y - 20);
+            }
+        }
+        ctx.restore();
+    }
+
+    // Gestione messaggi di evento globale
+    if (typeof globalEventTimer !== 'undefined' && globalEventTimer > 0) {
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(0, 0, 1200, 640);
+        ctx.fillStyle = '#f1c40f';
+        ctx.font = 'bold 42px Georgia';
+        ctx.textAlign = 'center';
+        ctx.fillText(globalEventMessage, 600, 320);
+        globalEventTimer--;
+    }
+    
+    if (interactionState.connections.length === 3 && !puzzleDualismoCompletato) {
+    puzzleDualismoCompletato = true;
+    gameState = "platoWin";
+}
+}
+
+function drawPlatoWinScreen() {
+    ctx.fillStyle = "rgba(0,0,0,0.85)";
+    ctx.fillRect(0, 0, 1200, 640);
+
+    ctx.textAlign = "center";
+
+    ctx.fillStyle = "#f1c40f";
+    ctx.font = "bold 40px Georgia";
+    ctx.fillText("DUALISMO COMPLETATO", 600, 250);
+
+    ctx.fillStyle = "#ecf0f1";
+    ctx.font = "20px Arial";
+    ctx.fillText("Hai ricongiunto le copie alle loro Idee eterne", 600, 310);
+
+    ctx.fillText("Premi [E] per uscire dall'Iperuranio", 600, 380);
+}
+// --- PIEDISTALLO SCURITO (Ottimo contrasto sul pavimento bianco) ---
+function drawPedestal(x, y) {
+    ctx.save();
+
+    // Ombra terra
+    ctx.fillStyle = "rgba(0, 0, 0, 0.15)";
+    ctx.beginPath();
+    ctx.ellipse(x, y + 40, 55, 15, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Base (Grigio Pietra Scuro)
+    ctx.fillStyle = "#57606f";
+    ctx.fillRect(x - 50, y + 20, 100, 20);
+
+    // Corpo centrale (Grigio Medio)
+    ctx.fillStyle = "#747d8c";
+    ctx.fillRect(x - 35, y - 20, 70, 40);
+    // Dettagli scanalature staccate
+    ctx.fillStyle = "#2f3542";
+    ctx.fillRect(x - 20, y - 20, 4, 40);
+    ctx.fillRect(x + 16, y - 20, 4, 40);
+
+    // Top (Grigio Pietra Chiaro per far staccare la statua)
+    ctx.fillStyle = "#a4b0be";
+    ctx.fillRect(x - 40, y - 30, 80, 12);
+    
+    ctx.restore();
+}
+
+// ==========================================
+//          IPERURANIO (PERFEZIONE ASSOLUTA)
+// ==========================================
+
+function drawPerfectTriangle(x, y) {
+    ctx.save();
+    
+    // Bagliore d'oro
+    let glow = ctx.createRadialGradient(x, y - 20, 0, x, y - 20, 50);
+    glow.addColorStop(0, 'rgba(241, 196, 15, 0.4)');
+    glow.addColorStop(1, 'rgba(241, 196, 15, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(x, y - 20, 50, 0, Math.PI*2); ctx.fill();
+
+    // Triangolo Oro Lucido e simmetrico
+    ctx.fillStyle = "#f1c40f";
+    ctx.strokeStyle = "#f39c12";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x, y - 60);       
+    ctx.lineTo(x + 40, y + 10);   
+    ctx.lineTo(x - 40, y + 10);   
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Luce geometrica interna
+    ctx.fillStyle = "rgba(255, 255, 255, 0.35)";
+    ctx.beginPath();
+    ctx.moveTo(x, y - 60);
+    ctx.lineTo(x, y + 10);
+    ctx.lineTo(x - 40, y + 10);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+}
+
+function drawPerfectHuman(x, y) {
+    ctx.save();
+
+    // Colore Blu Notte Epico / Divino (Molto visibile sullo sfondo)
+    ctx.fillStyle = "#2e86de";
+    ctx.strokeStyle = "#10ac84";
+    ctx.lineWidth = 2.5;
+
+    // Testa (Cerchio Perfetto)
+    ctx.beginPath(); ctx.arc(x, y - 55, 12, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+    // Busto Canonico e dritto
+    ctx.beginPath();
+    ctx.moveTo(x - 16, y - 40); ctx.lineTo(x + 16, y - 40);
+    ctx.lineTo(x + 10, y - 5); ctx.lineTo(x - 10, y - 5);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+
+    // Braccia simmetriche parallele
+    ctx.fillRect(x - 36, y - 36, 20, 6);
+    ctx.fillRect(x + 16, y - 36, 20, 6);
+
+    // Gambe dritte e stabili
+    ctx.fillRect(x - 9, y - 5, 8, 30);
+    ctx.fillRect(x + 1, y - 5, 8, 30);
+
+    ctx.restore();
+}
+
+function drawPerfectScale(x, y) {
+    ctx.save();
+    
+    // Colore Smeraldo/Platino Energetico
+    ctx.fillStyle = "#1dd1a1";
+    ctx.strokeStyle = "#10ac84";
+    ctx.lineWidth = 3;
+
+    ctx.fillRect(x - 4, y - 55, 8, 75); // Palo
+    
+    ctx.fillStyle = "#f1c40f"; // Fulcro d'oro
+    ctx.beginPath(); ctx.arc(x, y - 51, 6, 0, Math.PI*2); ctx.fill();
+
+    // Barra perfettamente parallela al terreno
+    ctx.fillStyle = "#1dd1a1";
+    ctx.fillRect(x - 45, y - 49, 90, 5);
+
+    // Piatti identici
+    ctx.strokeStyle = "#2f3542";
+    ctx.lineWidth = 1.5;
+    // Sinistro
+    ctx.beginPath(); ctx.moveTo(x - 40, y - 45); ctx.lineTo(x - 55, y - 20); ctx.lineTo(x - 25, y - 20); ctx.closePath(); ctx.stroke();
+    ctx.fillStyle = "#f1c40f"; ctx.fillRect(x - 55, y - 20, 30, 4);
+    // Destro
+    ctx.beginPath(); ctx.moveTo(x + 40, y - 45); ctx.lineTo(x + 25, y - 20); ctx.lineTo(x + 55, y - 20); ctx.closePath(); ctx.stroke();
+    ctx.fillRect(x + 25, y - 20, 30, 4);
+
+    ctx.restore();
+}
+
+// ==========================================
+//          MONDO SENSIBILE (COPIE QUASI PERFETTE)
+// ==========================================
+
+function drawImperfectTriangle(x, y) {
+    ctx.save();
+
+    // Colore Oro meno nobile (Bronzo/Ottone più opaco)
+    ctx.fillStyle = "#d4ac0d";
+    ctx.strokeStyle = "#9a7d0a";
+    ctx.lineWidth = 3;
+
+    // Triangolo quasi perfetto, ma inclinato di pochissimi pixel e asimmetrico
+    ctx.beginPath();
+    ctx.moveTo(x + 3, y - 57);       // Punta leggermente spostata a destra
+    ctx.lineTo(x + 42, y + 12);     // Angolo destro leggermente più basso
+    ctx.lineTo(x - 38, y + 8);      // Angolo sinistro leggermente sfasato
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // Una singola, sottile crepa superficiale (non è distrutto, è solo "corrotto" dal tempo)
+    ctx.strokeStyle = "#7e5109";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x + 10, y - 20);
+    ctx.lineTo(x + 5, y - 5);
+    ctx.lineTo(x + 12, y + 5);
+    ctx.stroke();
+
+    ctx.restore();
+}
+
+function drawImperfectHuman(x, y) {
+    ctx.save();
+
+    // Stessi componenti della statua sopra, ma in versione "materiale" (Azzurro spento/grigiastro)
+    ctx.fillStyle = "#54a0ff";
+    ctx.strokeStyle = "#2e86de";
+    ctx.lineWidth = 2.5;
+
+    // Testa: non è un cerchio perfetto, è leggermente schiacciata/ovale
+    ctx.beginPath(); 
+    ctx.ellipse(x, y - 53, 13, 11, 0.1, 0, Math.PI * 2); 
+    ctx.fill(); 
+    ctx.stroke();
+
+    // Busto: leggermente curvo (postura umana, non geometrica e rigida come l'idea)
+    ctx.beginPath();
+    ctx.moveTo(x - 14, y - 38); ctx.lineTo(x + 18, y - 40); // Spalle asimmetriche
+    ctx.lineTo(x + 8, y - 5); ctx.lineTo(x - 11, y - 5);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+
+    // Braccia: uno è leggermente più basso dell'altro
+    ctx.fillRect(x - 34, y - 34, 20, 6); // braccio sx
+    ctx.fillRect(x + 18, y - 38, 20, 6); // braccio dx (più alto)
+
+    // Gambe: una leggermente piegata
+    ctx.fillRect(x - 10, y - 5, 8, 30);
+    
+    // Gamba destra disegnata in modo imperfetto/curvo
+    ctx.beginPath();
+    ctx.rect(x + 1, y - 5, 8, 26); // leggermente più corta o sollevata
+    ctx.fill(); ctx.stroke();
+
+    ctx.restore();
+}
+
+function drawImperfectScale(x, y) {
+    ctx.save();
+
+    // Verde rame/ossidato opaco
+    ctx.fillStyle = "#10ac84";
+    ctx.strokeStyle = "#01937c";
+    ctx.lineWidth = 3;
+
+    ctx.fillRect(x - 4, y - 55, 8, 75); // Palo centrale operativo
+    
+    ctx.fillStyle = "#ba9400"; // Fulcro opaco
+    ctx.beginPath(); ctx.arc(x, y - 51, 6, 0, Math.PI*2); ctx.fill();
+
+    // L'imperfezione della fisica: La barra è inclinata (Sbilanciata dalle passioni umane)
+    ctx.translate(x, y - 49);
+    ctx.rotate(0.08); // Leggera rotazione realistica, non esagerata
+
+    ctx.fillStyle = "#10ac84";
+    ctx.fillRect(-45, 0, 90, 5);
+
+    // Piatti identici all'originale, ma pendono storti a causa dell'inclinazione dell'asse
+    ctx.strokeStyle = "#2f3542";
+    ctx.lineWidth = 1.5;
+
+    // Piatto Sinistro (Sale leggermente)
+    ctx.beginPath(); ctx.moveTo(-40, 4); ctx.lineTo(-55, 29); ctx.lineTo(-25, 29); ctx.closePath(); ctx.stroke();
+    ctx.fillStyle = "#ba9400"; ctx.fillRect(-55, 29, 30, 4);
+
+    // Piatto Destro (Scende leggermente)
+    ctx.beginPath(); ctx.moveTo(40, 4); ctx.lineTo(25, 29); ctx.lineTo(55, 29); ctx.closePath(); ctx.stroke();
+    ctx.fillRect(25, 29, 30, 4);
+
+    ctx.restore();
+}
+function movePlayer(dx, dy) {
+ // 🔥 NUOVO: Se siamo nella schermata di vittoria, il giocatore è congelato
+    if (gameState === "platoWin") return;
+    // 1. Calcola la posizione dove il giocatore vorrebbe andare
+    let nextX = player.x + dx;
+    let nextY = player.y + dy;
+
+    // Salva la posizione attuale prima del movimento
+    let tentX = player.x;
+    let tentY = player.y;
+
+    // (Il resto della tua funzione movePlayer rimane identico...)
+    if (keys.ArrowLeft  || keys.a) tentX -= 3;
+    if (keys.ArrowRight || keys.d) tentX += 3;
+    if (keys.ArrowUp    || keys.w) tentY -= 3;
+    if (keys.ArrowDown  || keys.s) tentY += 3;
+
+    let sbatte = false;
+
+    for (let i = 0; i < platoStatues.length; i++) {
+        let statua = platoStatues[i];
+        if (Math.abs(tentX - statua.x) < 45 && (tentY > statua.y + 5 && tentY < statua.y + 35)) {
+            sbatte = true;
+            break;
+        }
+    }
+
+    if (!sbatte) {
+        player.x = tentX;
+        player.y = tentY;
+    }
+// ==========================================
+// 🚪 PORTA FINALE ROOM 4 (FIX ROBUSTO)
+// ==========================================
+if (room === 4 && finalKeyTaken) {
+
+    // centro porta
+    let doorX = 600;
+    let doorY = 20; // in alto
+
+    let dist = Math.hypot(
+        (player.x + player.w / 2) - doorX,
+        (player.y + player.h / 2) - doorY
+    );
+
+    // se sei vicino alla porta → entri
+    if (dist < 60) {
+
+        room4Door.open = true;
+
+        gameState = "world";
+        room = 5;
+
+        player.x = 600;
+        player.y = 540;
+
+        return;
+    }
+}
+}
+function handleInteraction() {
+    // Controlla la vicinanza usando lo STESSO raggio esatto usato per disegnare la scritta UI (statue.interactDist)
+    let nearbyStatue = platoStatues.find(statue => Math.hypot(player.x - statue.x, player.y - statue.y) < statue.interactDist);
+    
+    // Se non trova nessuna statua nel raggio allargato, esce
+    if (!nearbyStatue) return; 
+
+    // LOGICA DI RACCOLTA/COLLEGAMENTO CORDA
+    if (!interactionState.selectedStatue) {
+        // Raccogli corda nel mondo sensibile
+        if (nearbyStatue.world === "sensibile" && !interactionState.connections.includes(nearbyStatue.id)) {
+            interactionState.selectedStatue = nearbyStatue;
+        }
+    } else {
+        // Rilascia o annulla se premi sulla stessa
+        if (nearbyStatue.id === interactionState.selectedStatue.id) {
+            interactionState.selectedStatue = null;
+            return;
+        }
+
+        // Collega se hai preso la statua corretta dell'Iperuranio
+        if (nearbyStatue.id === interactionState.selectedStatue.targetId) {
+            interactionState.connections.push(interactionState.selectedStatue.id);
+            interactionState.selectedStatue = null;
+        } else {
+            // Se sbagli ad agganciare nell'Iperuranio, la corda si resetta
+            interactionState.selectedStatue = null;
+        }
+    }
+}
+// Aggancio dell'evento alla tastiera (Es: Tasto "E" o Barra Spaziatrice)
+window.addEventListener("keydown", (e) => {
+    if (e.key.toLowerCase() === "e" || e.key === " ") {
+        handleInteraction();
+    }
+});
+
+function loop() {
+    // 1. GESTIONE SPECIFICA MINIGIOCO PLATONE
+    if (gameState === "platoGame") {
+        
+        // 🔥 MODIFICATO: Usiamo movePlayer(0,0) invece di move() per sbloccare l'omino!
+        if (typeof movePlayer === 'function') {
+            movePlayer(0, 0); 
+        } else if (typeof move === 'function') {
+            move(); 
+        }
+        
+        // Muri invisibili AGGRANDITI attorno ai piedistalli
+        if (typeof platoStatues !== 'undefined') {
+            for (let i = 0; i < platoStatues.length; i++) {
+                let statua = platoStatues[i];
+                
+                // --- DIMENSIONI HITBOX INGRANDITE ---
+                let mezzoW = 55; // Più largo (destra/sinistra)
+                let mezzoH = 30; // Più spesso (sopra/sotto)
+                let centroX = statua.x;
+                let centroY = statua.y + 20; 
+
+                if (player.x > centroX - mezzoW && player.x < centroX + mezzoW &&
+                    player.y > centroY - mezzoH && player.y < centroY + mezzoH) {
+                    
+                    let daSinistra = player.x - (centroX - mezzoW);
+                    let daDestra   = (centroX + mezzoW) - player.x;
+                    let daSopra    = player.y - (centroY - mezzoH);
+                    let daSotto    = (centroY + mezzoH) - player.y;
+                    let min = Math.min(daSinistra, daDestra, daSopra, daSotto);
+
+                    if (min === daSinistra) player.x = centroX - mezzoW;
+                    else if (min === daDestra) player.x = centroX + mezzoW;
+                    else if (min === daSopra) player.y = centroY - mezzoH;
+                    else if (min === daSotto) player.y = centroY + mezzoH;
+                }
+            }
+        }
+
+        drawPlatoGameScreen();
+        requestAnimationFrame(loop);
+        return; 
+    }
+
+    // ... Tutto il resto del tuo loop rimane identico sotto ...
+    updateHeraclitusGame(); 
+    move(); 
+    checkDialogZone();
+    checkKeyCollection();
+    updateNearby();
+
+    checkGoldenKeyUnlock();
+    draw();
+
+    if (parmenideGame.active) {
+        updateParmenideGame();
+        drawParmenideGame();
+    }
+
+    if (heraclitusGame.flashTimer > 0) {
+        heraclitusGame.flashTimer--;
+    } else {
+        heraclitusGame.flash = null;
+    }
+
+    if (goldenKey.active && !goldenKey.collected) {
+        ctx.fillStyle = "gold";
+        drawKeyShape(goldenKey.x, goldenKey.y, 0);
+    }
+
+    if (goldenKey.followPlayer) {
+        goldenKey.x = player.x + 10;
+        goldenKey.y = player.y - 10;
+    }
+
+    requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
