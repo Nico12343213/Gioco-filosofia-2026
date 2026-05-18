@@ -4443,10 +4443,11 @@ function movePlayer(dx, dy) {
     let tentY = player.y;
 
     // (Il resto della tua funzione movePlayer rimane identico...)
-    if (keys.ArrowLeft  || keys.a) tentX -= 3;
-    if (keys.ArrowRight || keys.d) tentX += 3;
-    if (keys.ArrowUp    || keys.w) tentY -= 3;
-    if (keys.ArrowDown  || keys.s) tentY += 3;
+    // 🔥 ECCO IL PEZZO DA SOSTITUIRE DOVE TROVI "tentX"
+if (keys["arrowleft"]  || keys["ArrowLeft"]  || keys["a"] || keys["A"]) tentX -= 3;
+if (keys["arrowright"] || keys["ArrowRight"] || keys["d"] || keys["D"]) tentX += 3;
+if (keys["arrowup"]    || keys["ArrowUp"]    || keys["w"] || keys["W"]) tentY -= 3;
+if (keys["arrowdown"]  || keys["ArrowDown"]  || keys["s"] || keys["S"]) tentY += 3;
 
     let sbatte = false;
 
